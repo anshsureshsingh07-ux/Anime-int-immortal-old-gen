@@ -1,0 +1,6 @@
+{
+  "name": "Anime Int",
+  "description": "Where anime lives. Trending news, community interactions, and recruitment for anime fans.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -1,0 +1,78 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+:root {
+  --bg: #050505;
+  --sidebar-bg: #0a0a0a;
+  --card-bg: #111111;
+  --card-hover-bg: #1a1a1a;
+  --border: #1f1f1f;
+  --accent: #ff0000;
+  --accent-hover: #cc0000;
+  --text-primary: #ffffff;
+  --text-secondary: #8e9299;
+  --text-dim: #555555;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  margin: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom cyber-anime elements */
+.cyber-card {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px; /* Shorter border radius for "High Density" look */
+  transition: all 0.2s ease;
+  overflow: hidden;
+}
+
+.cyber-card:hover {
+  border-color: #333;
+}
+
+.neon-border {
+  position: relative;
+}
+
+.neon-border::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--accent);
+}
+
+.glass-panel {
+  background: rgba(10, 10, 10, 0.8);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--border);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
