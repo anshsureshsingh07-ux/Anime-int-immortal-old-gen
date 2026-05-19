@@ -2,46 +2,65 @@ import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Search, Filter, Play, Star, Calendar, Grid, List as ListIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useQuery } from "convex/react";
-import { api } from "../../convex/_generated/api";
 
 export default function AnimeDatabase() {
   const [animeList, setAnimeList] = useState<any[]>([]);
+  const [localAnime, setLocalAnime] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [filter, setFilter] = useState('bypopularity');
 
-  const convexAnime: any[] = []; // useQuery(api.anime.listAll, { limit: 24 });
+  const fetchLocalAnime = async () => {
+    const { supabase } = await import('../lib/supabase');
+    const { data } = await supabase.from('anime').select('*').order('created_at', { ascending: false });
+    if (data) setLocalAnime(data);
+  };
 
-  const fetchAnime = async (query = '', p = 1, signal?: AbortSignal) => {
+  useEffect(() => {
+    fetchLocalAnime();
+  }, []);
+
+  const fetchAnime = async (query = '', p = 1, signal?: AbortSignal, retries = 2): Promise<void> => {
     setLoading(true);
     
     // Primarily use Jikan for the catalog as it's a massive external dataset
     const url = query 
       ? `https://api.jikan.moe/v4/anime?q=${query}&page=${p}&limit=24`
       : `https://api.jikan.moe/v4/top/anime?filter=${filter}&page=${p}&limit=24`;
-
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal });
+      
+      if (!res.ok) {
+        if (res.status === 429 && retries > 0) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+          return fetchAnime(query, p, signal, retries - 1);
+        }
+        throw new Error(`Jikan status: ${res.status}`);
+      }
+
       const data = await res.json();
       
       if (signal?.aborted) return;
 
-      if (p === 1) {
-        setAnimeList(data.data || []);
-      } else {
-        setAnimeList(prev => {
-          const newItems = data.data || [];
-          const existingIds = new Set(prev.map(a => a.mal_id));
-          const filteredNewItems = newItems.filter((a: any) => !existingIds.has(a.mal_id));
-          return [...prev, ...filteredNewItems];
-        });
+      if (data.data) {
+        if (p === 1) {
+          setAnimeList(data.data || []);
+        } else {
+          setAnimeList(prev => {
+            const newItems = data.data || [];
+            const existingIds = new Set(prev.map(a => a.mal_id));
+            const filteredNewItems = newItems.filter((a: any) => !existingIds.has(a.mal_id));
+            return [...prev, ...filteredNewItems];
+          });
+        }
+        setHasMore(data.pagination?.has_next_page);
       }
-      setHasMore(data.pagination?.has_next_page);
-    } catch (innerErr) {
-      console.error('Jikan fetch error:', innerErr);
+    } catch (innerErr: any) {
+      if (innerErr.name !== 'AbortError') {
+        console.error('Jikan fetch error:', innerErr);
+      }
     } finally {
       if (!signal?.aborted) {
         setLoading(false);
@@ -99,6 +118,25 @@ export default function AnimeDatabase() {
       </header>
 
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
+        {page === 1 && localAnime.length > 0 && !searchQuery && localAnime.map((anime, idx) => (
+           <motion.div
+            key={`local-${anime.id}`}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="group cursor-pointer"
+          >
+            <div className="relative aspect-[3/4] rounded-lg overflow-hidden border-2 border-red-600/20 mb-3 bg-black">
+              <img src={anime.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+              <div className="absolute top-2 left-2 bg-red-600 text-[8px] font-black text-white px-2 py-1 rounded uppercase tracking-widest shadow-xl">Nexus Node</div>
+              <div className="absolute bottom-2 right-2 bg-black/80 px-1.5 py-0.5 rounded text-[8px] font-black text-white flex items-center gap-1 uppercase">
+                <Star size={8} className="text-red-600" fill="currentColor" /> {anime.rating || 'N/A'}
+              </div>
+            </div>
+            <h3 className="text-xs font-bold text-red-500 group-hover:text-white transition-colors truncate italic uppercase tracking-tighter">{anime.title}</h3>
+            <p className="text-[9px] text-gray-600 font-mono mt-1 uppercase truncate">Verified Local Intelligence</p>
+          </motion.div>
+        ))}
+
         {animeList.map((anime, idx) => (
           <motion.div
             key={`${anime.mal_id}-${idx}`}

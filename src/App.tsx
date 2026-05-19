@@ -17,13 +17,13 @@ import {
   Bell,
   Menu,
   X,
-  Flame
+  Flame,
+  User,
+  FileText
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useConvexAuth, useMutation, useQuery } from "convex/react";
-import { SignInButton, UserButton, useUser } from "@clerk/clerk-react";
-import { api } from "../convex/_generated/api";
-import { Show } from './components/ClerkCompat';
+import { supabase } from './lib/supabase';
+import { Navigate } from 'react-router-dom';
 
 // Pages
 import Home from './pages/Home';
@@ -31,43 +31,121 @@ import AnimeDatabase from './pages/Database';
 import Recruitment from './pages/Recruitment';
 import Admin from './pages/Admin';
 import AnimeDetails from './pages/AnimeDetails';
+import AuthPage from './pages/Auth';
+import ResetPassword from './pages/ResetPassword';
+import News from './pages/News';
+import Profile from './pages/Profile';
+import NewsDetail from './pages/NewsDetail';
 
 function AppLayout({ children }: { children: React.ReactNode }) {
-  const isAuthenticated = true;
-  const user = { 
-    id: 'mock-user-id',
-    username: 'Admin User', 
-    firstName: 'Admin', 
-    lastName: 'User',
-    emailAddresses: [{ emailAddress: 'admin@nexus.com' }],
-    imageUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80&h=80&fit=crop' 
-  };
-  const dbUser = { role: 'admin' };
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [session, setSession] = useState<any>(null);
+  const [dbUser, setDbUser] = useState<any>(null);
   const location = useLocation();
 
   useEffect(() => {
-    // Auth mocked - no need to store user
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      }
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+      } else {
+        setDbUser(null);
+      }
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
+
+  const fetchProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', userId)
+      .single();
+    
+    if (data) {
+      setDbUser(data);
+    } else if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching profile:', error);
+    }
+  };
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+  };
+
+  const user = session?.user ? {
+    id: session.user.id,
+    email: session.user.email,
+    username: dbUser?.username || session.user.email?.split('@')[0],
+    imageUrl: dbUser?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.id}`
+  } : null;
+
+  const currentDbUser = dbUser || (user ? { role: 'member' } : null);
+
+  useEffect(() => {
+    setIsSidebarOpen(false);
+  }, [location.pathname]);
 
   const navItems = [
     { name: 'Home Feed', path: '/', icon: HomeIcon },
     { name: 'Database', path: '/database', icon: DatabaseIcon },
+    { name: 'Neural News', path: '/news', icon: FileText },
     { name: 'Recruitment', path: '/recruit', icon: RecruitIcon },
+    { name: 'Profile Node', path: '/profile', icon: User },
   ];
 
-  const isAdmin = dbUser && (dbUser.role === 'admin' || dbUser.role === 'news_writer' || dbUser.role === 'moderator');
+  const isAdmin = (currentDbUser && (currentDbUser.role === 'admin' || currentDbUser.role === 'news_writer' || currentDbUser.role === 'moderator')) || 
+                  (session?.user?.email === 'anshsureshsingh07@gmail.com' || session?.user?.email === 'animeintofficial@gmail.com');
+
+  const isAuthRoute = location.pathname === '/auth' || location.pathname === '/auth/reset-password';
+
+  if (!session && !isAuthRoute) {
+    return <AuthPage />;
+  }
+
+  if (isAuthRoute && session && location.pathname !== '/auth/reset-password') {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <div className="flex h-screen w-full bg-[#050505] text-gray-200 overflow-hidden">
+      {/* Sidebar Overlay for Mobile */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 lg:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-64 bg-[#0A0A0A] border-r border-[#1F1F1F] flex flex-col shrink-0">
-        <div className="p-6 flex items-center gap-3">
-          <div className="w-8 h-8 bg-gradient-to-br from-[#FF0000] to-[#800000] rounded-sm rotate-45 flex items-center justify-center">
-            <div className="w-3 h-3 bg-white rounded-full"></div>
+      <aside className={`
+        fixed inset-y-0 left-0 z-50 w-64 bg-[#0A0A0A] border-r border-[#1F1F1F] flex flex-col shrink-0 
+        transition-transform duration-300 lg:relative lg:translate-x-0
+        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+      `}>
+        <div className="p-6 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-gradient-to-br from-[#FF0000] to-[#800000] rounded-sm rotate-45 flex items-center justify-center">
+              <div className="w-3 h-3 bg-white rounded-full"></div>
+            </div>
+            <h1 className="text-xl font-black tracking-tighter text-white uppercase italic">
+              Anime <span className="text-[#FF0000]">Int.</span>
+            </h1>
           </div>
-          <h1 className="text-xl font-black tracking-tighter text-white uppercase italic">
-            Anime <span className="text-[#FF0000]">Int.</span>
-          </h1>
+          <button 
+            className="lg:hidden p-2 text-gray-400 hover:text-white"
+            onClick={() => setIsSidebarOpen(false)}
+          >
+            <X size={20} />
+          </button>
         </div>
 
         <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto">
@@ -105,10 +183,10 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           )}
         </nav>
 
-        <div className="p-4 border-t border-[#1F1F1F]">
+        <div className="p-4 border-t border-[#1F1F1F] space-y-3">
           <div className="bg-[#111] rounded-lg p-4 border border-[#1F1F1F]">
             <p className="text-[10px] text-gray-500 mb-2 uppercase tracking-widest font-black">Recruitment Active</p>
-            <p className="text-xs font-bold text-white leading-tight mb-3 italic">Looking for Thumbnail & Video Editors</p>
+            <p className="text-xs font-bold text-white leading-tight mb-3 italic">Looking for Editors & Writers</p>
             <Link 
               to="/recruit"
               className="block w-full py-2 bg-[#FF0000] hover:bg-[#CC0000] text-white text-[10px] font-black uppercase tracking-widest rounded text-center transition-colors"
@@ -116,20 +194,37 @@ function AppLayout({ children }: { children: React.ReactNode }) {
               Apply Now
             </Link>
           </div>
+          
+          <button 
+            onClick={handleSignOut}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-white hover:bg-white/5 transition-all border border-transparent hover:border-white/10"
+          >
+            <LogOut size={16} />
+            Initialize Logoff
+          </button>
         </div>
       </aside>
 
       {/* Main Container */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Header */}
-        <header className="h-16 border-b border-[#1F1F1F] flex items-center justify-between px-8 bg-[#050505] shrink-0">
-          <div className="relative w-96 hidden md:block">
-            <input 
-              type="text" 
-              placeholder="Search archives (Anime, Studios, Genre...)" 
-              className="w-full bg-[#111] border border-[#222] rounded-full py-2 px-10 text-xs focus:outline-none focus:border-[#FF0000] transition-colors font-mono"
-            />
-            <Search className="absolute left-4 top-2.5 text-gray-500" size={14} />
+        <header className="h-16 border-b border-[#1F1F1F] flex items-center justify-between px-4 lg:px-8 bg-[#050505] shrink-0">
+          <div className="flex items-center gap-4">
+            <button 
+              className="lg:hidden p-2 text-gray-400 hover:text-white transition-colors"
+              onClick={() => setIsSidebarOpen(true)}
+            >
+              <Menu size={24} />
+            </button>
+            
+            <div className="relative w-64 xl:w-96 hidden md:block">
+              <input 
+                type="text" 
+                placeholder="Search archives..." 
+                className="w-full bg-[#111] border border-[#222] rounded-full py-2 px-10 text-xs focus:outline-none focus:border-[#FF0000] transition-colors font-mono"
+              />
+              <Search className="absolute left-4 top-2.5 text-gray-500" size={14} />
+            </div>
           </div>
 
           <div className="flex items-center gap-6 ml-auto">
@@ -137,15 +232,18 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                <Bell size={20} />
                <span className="absolute top-2 right-2 w-2 h-2 bg-[#FF0000] rounded-full border-2 border-[#050505]"></span>
             </button>
-                        <div className="flex items-center gap-3 pl-4 border-l border-[#1F1F1F]">
+            <div className="flex items-center gap-3 pl-4 border-l border-[#1F1F1F]">
                 <div className="text-right hidden sm:block">
-                   <div className="text-xs font-bold text-white uppercase italic">{user?.username || user?.firstName || 'Vanguard Member'}</div>
+                   <div className="text-xs font-bold text-white uppercase italic">{user?.username || 'Vanguard Member'}</div>
                    <div className="text-[10px] text-[#FF0000] font-mono font-black uppercase tracking-widest">
-                     {dbUser?.role ? dbUser.role.replace('_', ' ') : 'AGENT'}
+                     {currentDbUser?.role ? currentDbUser.role.replace('_', ' ') : 'AGENT'}
                    </div>
                 </div>
-                <div className="w-8 h-8 rounded-full overflow-hidden border border-[#FF0000]/50">
-                  <img src={user.imageUrl} alt="Avatar" className="w-full h-full object-cover" />
+                <div className="w-10 h-10 rounded shadow-[0_0_15px_rgba(255,255,255,0.05)] border border-[#1F1F1F] overflow-hidden group relative cursor-pointer">
+                  <img src={user?.imageUrl} alt="Avatar" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end justify-center p-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                     <UserIcon size={12} className="text-white" />
+                  </div>
                 </div>
              </div>
           </div>
@@ -192,7 +290,12 @@ export default function App() {
       <AppLayout>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/auth" element={<AuthPage />} />
+          <Route path="/auth/reset-password" element={<ResetPassword />} />
           <Route path="/database" element={<AnimeDatabase />} />
+          <Route path="/news" element={<News />} />
+          <Route path="/news/:id" element={<NewsDetail />} />
+          <Route path="/profile" element={<Profile />} />
           <Route path="/anime/:id" element={<AnimeDetails />} />
           <Route path="/recruit" element={<Recruitment />} />
           <Route path="/admin" element={<Admin />} />

@@ -1,6 +1,6 @@
 {
   "name": "Anime Int",
-  "description": "Where anime lives. Trending news, community interactions, and recruitment for anime fans.",
+  "description": "The ultimate anime community nexus. Features a real-time release tracker, community voting, and the Vanguard Admin System for full archive management.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

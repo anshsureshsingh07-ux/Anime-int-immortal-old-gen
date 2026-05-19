@@ -1,9 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { UserPlus, MessageSquare, Shield, Send, Terminal, AlertCircle } from 'lucide-react';
-import { useQuery, useMutation } from "convex/react";
-import { api } from "../../convex/_generated/api";
-import { useUser } from "@clerk/clerk-react";
+import { supabase } from '../lib/supabase';
 
 export default function Recruitment() {
   const [formData, setFormData] = useState({
@@ -18,16 +16,36 @@ export default function Recruitment() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState('');
+  const [session, setSession] = useState<any>(null);
+  const [existingApp, setExistingApp] = useState<any>(null);
 
-  const user = { 
-    id: 'mock-user-id', 
-    username: 'Admin User', 
-    firstName: 'Admin', 
-    emailAddresses: [{ emailAddress: 'admin@nexus.com' }],
-    imageUrl: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=80&h=80&fit=crop' 
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session?.user) {
+        checkExistingApplication(session.user.id);
+      }
+    });
+  }, []);
+
+  const checkExistingApplication = async (userId: string) => {
+    const { data } = await supabase
+      .from('applications')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', 'pending')
+      .single();
+    
+    if (data) setExistingApp(data);
   };
-  const createApplication = useMutation(api?.applications?.create as any || "applications:create");
-  const existingApp: any = null; 
+
+  const user = session?.user ? {
+    id: session.user.id,
+    email: session.user.email,
+  } : {
+    id: 'mock-user-id',
+    email: 'admin@nexus.com'
+  };
 
   const roles = [
     { id: 'news_writer', name: 'News Writer', desc: 'Cover breaking news and trending topics.', icon: Shield },
@@ -51,11 +69,16 @@ export default function Recruitment() {
         throw new Error('You already have a pending application.');
       }
 
-      await createApplication({
-        ...formData,
-        userId: user.id,
-        userEmail: user.emailAddresses[0].emailAddress,
-      });
+      const { error: submitError } = await supabase.from('applications').insert([
+        {
+          ...formData,
+          user_id: user.id,
+          user_email: user.email,
+          status: 'pending'
+        }
+      ]);
+
+      if (submitError) throw submitError;
       setSubmitted(true);
     } catch (err: any) {
       setError(err.message || 'Submission failed. Please try again.');
@@ -181,9 +204,20 @@ export default function Recruitment() {
               <label className="text-[10px] font-black uppercase tracking-widest text-[#555]">Skill Matrix</label>
               <textarea 
                 required
-                rows={3}
+                rows={2}
                 value={formData.skills}
                 onChange={(e) => setFormData({...formData, skills: e.target.value})}
+                className="w-full bg-[#050505] border border-[#1F1F1F] rounded p-3 text-xs focus:border-[#FF0000] outline-none font-mono resize-none text-white appearance-none"
+              ></textarea>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-[#555]">Bio/Past Experience</label>
+              <textarea 
+                required
+                rows={3}
+                value={formData.experience}
+                onChange={(e) => setFormData({...formData, experience: e.target.value})}
                 className="w-full bg-[#050505] border border-[#1F1F1F] rounded p-3 text-xs focus:border-[#FF0000] outline-none font-mono resize-none text-white appearance-none"
               ></textarea>
             </div>

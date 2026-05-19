@@ -13,16 +13,27 @@ export default function AnimeDetails() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch(`https://api.jikan.moe/v4/anime/${id}/full`)
-      .then(res => res.json())
-      .then(data => {
+    const fetchWithRetry = async (retries = 3) => {
+      setLoading(true);
+      try {
+        const res = await fetch(`https://api.jikan.moe/v4/anime/${id}/full`);
+        if (!res.ok) {
+          if (res.status === 429 && retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return fetchWithRetry(retries - 1);
+          }
+          throw new Error(`Jikan error: ${res.status}`);
+        }
+        const data = await res.json();
         setAnime(data.data);
+      } catch (err) {
+        console.error('Fetch error:', err);
+      } finally {
         setLoading(false);
-      })
-      .catch(err => {
-        console.error(err);
-        setLoading(false);
-      });
+      }
+    };
+
+    fetchWithRetry();
   }, [id]);
 
   if (loading) {
@@ -159,11 +170,11 @@ export default function AnimeDetails() {
                </div>
             </div>
 
-            <div className="p-6 bg-gradient-to-br from-[#1A0000] to-[#050505] border border-[#FF0000]/20 rounded relative overflow-hidden">
-               <p className="text-[9px] text-[#FF0000] font-black uppercase tracking-[0.2em] mb-4">Transmission</p>
-               <h4 className="text-sm font-bold text-white mb-6">Found intelligence leaks? Share them in the nexusBoard.</h4>
-               <Link to="/community" className="block text-center py-2 bg-[#FF0000] text-white text-[10px] font-black uppercase tracking-widest rounded hover:bg-[#CC0000] transition-colors">Go to Board</Link>
-            </div>
+             <div className="p-6 bg-gradient-to-br from-[#1A0000] to-[#050505] border border-[#FF0000]/20 rounded relative overflow-hidden">
+                <p className="text-[9px] text-[#FF0000] font-black uppercase tracking-[0.2em] mb-4">Transmission</p>
+                <h4 className="text-sm font-bold text-white mb-6">Found intelligence leaks? Access the database archives.</h4>
+                <Link to="/database" className="block text-center py-2 bg-[#FF0000] text-white text-[10px] font-black uppercase tracking-widest rounded hover:bg-[#CC0000] transition-colors">Go to Archives</Link>
+             </div>
          </div>
       </div>
     </div>

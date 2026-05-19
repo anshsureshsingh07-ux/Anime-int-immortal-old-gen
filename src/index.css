@@ -5,6 +5,19 @@
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 }
 
+@keyframes marquee {
+  0% { transform: translateX(0); }
+  100% { transform: translateX(-33.33%); }
+}
+
+.animate-marquee-slower {
+  animation: marquee 40s linear infinite;
+}
+
+.animate-marquee-slower:hover {
+  animation-play-state: paused;
+}
+
 :root {
   --bg: #050505;
   --sidebar-bg: #0a0a0a;
