@@ -126,7 +126,7 @@ export default function NewsDetail() {
           className="relative aspect-video rounded-[2.5rem] overflow-hidden border border-white/10 mb-20 group shadow-2xl"
         >
           <img 
-            src={article.image} 
+            src={article.image || undefined} 
             alt={article.title}
             className="w-full h-full object-cover"
           />

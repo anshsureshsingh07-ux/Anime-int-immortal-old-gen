@@ -24,6 +24,8 @@ import {
 import { motion } from 'motion/react';
 import { supabase } from './lib/supabase';
 import { Navigate } from 'react-router-dom';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { auth } from './lib/firebase';
 
 // Pages
 import Home from './pages/Home';
@@ -39,35 +41,149 @@ import NewsDetail from './pages/NewsDetail';
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [session, setSession] = useState<any>(null);
+  const [firebaseUser, setFirebaseUser] = useState<any>(null);
+  const isActualAdmin = firebaseUser && firebaseUser.email === 'anshsureshsingh07@gmail.com';
+  const [supabaseSession, setSupabaseSession] = useState<any>(null);
   const [dbUser, setDbUser] = useState<any>(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
   const location = useLocation();
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      }
-    });
+  // Dynamic Release Tracker States
+  const [isReleaseTrackerDrawerOpen, setIsReleaseTrackerDrawerOpen] = useState(false);
+  const [trackerReleases, setTrackerReleases] = useState<any[]>([]);
+  const [editingTrackerId, setEditingTrackerId] = useState<string | null>(null);
+  const [trackerForm, setTrackerForm] = useState({ title: '', release_date: '', episode: 1, platform: 'OUT NOW' });
+  const [isAddingTracker, setIsAddingTracker] = useState(false);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session?.user) {
-        fetchProfile(session.user.id);
+  const fetchTrackerReleases = async () => {
+    try {
+      const { data } = await supabase
+        .from('release_tracker')
+        .select('*')
+        .order('release_date', { ascending: true });
+      if (data) {
+        setTrackerReleases(data);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch release_tracker rows:', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchTrackerReleases();
+  }, [isReleaseTrackerDrawerOpen]);
+
+  const handleSaveTracker = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!trackerForm.title || !trackerForm.release_date) return;
+
+    try {
+      const payload = {
+        title: trackerForm.title,
+        release_date: new Date(trackerForm.release_date).toISOString(),
+        episode: Number(trackerForm.episode) || 1,
+        platform: trackerForm.platform || 'OUT NOW'
+      };
+
+      if (editingTrackerId) {
+        const { error } = await supabase
+          .from('release_tracker')
+          .update(payload)
+          .eq('id', editingTrackerId);
+        if (!error) {
+          setEditingTrackerId(null);
+          setTrackerForm({ title: '', release_date: '', episode: 1, platform: 'OUT NOW' });
+          fetchTrackerReleases();
+        }
+      } else {
+        const { error } = await supabase
+          .from('release_tracker')
+          .insert([payload]);
+        if (!error) {
+          setIsAddingTracker(false);
+          setTrackerForm({ title: '', release_date: '', episode: 1, platform: 'OUT NOW' });
+          fetchTrackerReleases();
+        }
+      }
+    } catch (err) {
+      console.error('Error modifying release_tracker:', err);
+    }
+  };
+
+  const handleDeleteTracker = async (id: string) => {
+    try {
+      const { error } = await supabase.from('release_tracker').delete().eq('id', id);
+      if (!error) {
+        fetchTrackerReleases();
+      }
+    } catch (err) {
+      console.error('Error deleting release_tracker:', err);
+    }
+  };
+
+  useEffect(() => {
+    // Firebase auth listener
+    const unsubscribeFirebase = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setLoadingAuth(false);
+      if (user?.uid) {
+        fetchProfileById(user.uid);
+      } else if (user?.email) {
+        fetchProfileByEmail(user.email);
       } else {
         setDbUser(null);
       }
     });
 
-    return () => subscription.unsubscribe();
+    // Supabase session listener for RLS / Supabase features
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSupabaseSession(session);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSupabaseSession(session);
+    });
+
+    return () => {
+      unsubscribeFirebase();
+      subscription.unsubscribe();
+    };
   }, []);
 
-  const fetchProfile = async (userId: string) => {
+  useEffect(() => {
+    const handleProfileUpdate = () => {
+      if (firebaseUser?.uid) {
+        fetchProfileById(firebaseUser.uid);
+      } else if (firebaseUser?.email) {
+        fetchProfileByEmail(firebaseUser.email);
+      }
+    };
+
+    window.addEventListener('profiles-updated', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('profiles-updated', handleProfileUpdate);
+    };
+  }, [firebaseUser]);
+
+  const fetchProfileById = async (userId: string) => {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
+      .single();
+    
+    if (data) {
+      setDbUser(data);
+    } else if (error && error.code !== 'PGRST116') {
+      console.error('Error fetching profile by ID:', error);
+    }
+  };
+
+  const fetchProfileByEmail = async (email: string) => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('email', email)
       .single();
     
     if (data) {
@@ -78,17 +194,25 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   const handleSignOut = async () => {
+    await signOut(auth);
     await supabase.auth.signOut();
   };
 
-  const user = session?.user ? {
-    id: session.user.id,
-    email: session.user.email,
-    username: dbUser?.username || session.user.email?.split('@')[0],
-    imageUrl: dbUser?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session.user.id}`
+  const user = firebaseUser ? {
+    id: firebaseUser.uid,
+    email: firebaseUser.email,
+    username: dbUser?.username || firebaseUser.email?.split('@')[0],
+    imageUrl: dbUser?.avatar_url || dbUser?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`
   } : null;
 
-  const currentDbUser = dbUser || (user ? { role: 'member' } : null);
+  let currentDbUser = dbUser || (user ? { role: 'member' } : null);
+  if (firebaseUser?.email === 'anshsureshsingh07@gmail.com') {
+    if (currentDbUser) {
+      currentDbUser = { ...currentDbUser, role: 'admin' };
+    } else {
+      currentDbUser = { role: 'admin' };
+    }
+  }
 
   useEffect(() => {
     setIsSidebarOpen(false);
@@ -103,15 +227,25 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   ];
 
   const isAdmin = (currentDbUser && (currentDbUser.role === 'admin' || currentDbUser.role === 'news_writer' || currentDbUser.role === 'moderator')) || 
-                  (session?.user?.email === 'anshsureshsingh07@gmail.com' || session?.user?.email === 'animeintofficial@gmail.com');
+                  (firebaseUser?.email === 'anshsureshsingh07@gmail.com' || firebaseUser?.email === 'animeintofficial@gmail.com');
 
   const isAuthRoute = location.pathname === '/auth' || location.pathname === '/auth/reset-password';
 
-  if (!session && !isAuthRoute) {
+  if (loadingAuth) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-[10px] font-mono text-gray-500 uppercase tracking-[0.4em] animate-pulse">
+          Decrypting session...
+        </div>
+      </div>
+    );
+  }
+
+  if (!firebaseUser && !isAuthRoute) {
     return <AuthPage />;
   }
 
-  if (isAuthRoute && session && location.pathname !== '/auth/reset-password') {
+  if (isAuthRoute && firebaseUser && location.pathname !== '/auth/reset-password') {
     return <Navigate to="/" replace />;
   }
 
@@ -240,7 +374,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                    </div>
                 </div>
                 <div className="w-10 h-10 rounded shadow-[0_0_15px_rgba(255,255,255,0.05)] border border-[#1F1F1F] overflow-hidden group relative cursor-pointer">
-                  <img src={user?.imageUrl} alt="Avatar" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" />
+                  <img src={user?.imageUrl || undefined} alt="Avatar" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end justify-center p-1 opacity-0 group-hover:opacity-100 transition-opacity">
                      <UserIcon size={12} className="text-white" />
                   </div>
@@ -255,21 +389,43 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </main>
 
         {/* Bottom Ticker */}
-        <footer className="h-10 bg-[#0A0A0A] border-t border-[#1F1F1F] flex items-center px-6 shrink-0">
+        <footer 
+          className={`h-10 bg-[#0A0A0A] border-t border-[#1F1F1F] flex items-center px-6 shrink-0 select-none ${
+            isActualAdmin ? "cursor-pointer hover:bg-black/80 group" : ""
+          }`}
+          onClick={isActualAdmin ? () => {
+            fetchTrackerReleases();
+            setIsReleaseTrackerDrawerOpen(true);
+          } : undefined}
+          title={isActualAdmin ? "Click to Open Release Tracker Controller" : "Release Tracker"}
+        >
           <div className="text-[10px] font-black uppercase text-[#FF0000] tracking-tighter mr-6 shrink-0 flex items-center gap-2">
-            <Flame size={12} fill="currentColor" /> Release Tracker
+            <Flame size={12} fill="currentColor" className={isActualAdmin ? "group-hover:animate-bounce" : ""} /> Release Tracker 
+            {isActualAdmin && (
+              <span className="text-[8px] font-mono text-gray-500 lowercase px-1 bg-white/5 rounded border border-white/10 group-hover:text-white group-hover:bg-red-600/20 group-hover:border-red-600/30 transition-all">[Edit]</span>
+            )}
           </div>
           <div className="flex-1 overflow-hidden flex gap-8 text-[10px] font-mono text-gray-500 whitespace-nowrap">
             <motion.div 
                animate={{ x: [0, -1000] }} 
-               transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
+               transition={{ duration: 40, repeat: Infinity, ease: "linear" }}
                className="flex gap-12"
             >
-               <span>[14:00] ONE PIECE - EP 1106 OUT NOW</span>
-               <span>[16:30] SLIME S3 - EP 07 NEXT IN 2H 15M</span>
-               <span>[21:00] MASHLE S2 FINALE - STREAMING SOON</span>
-               <span>[00:00] NEW MANGA UPDATE - JUJUTSU KAISEN CH 260</span>
-               <span>[ACTIVE] 12,402 NODES ONLINE</span>
+               {trackerReleases && trackerReleases.length > 0 ? (
+                 trackerReleases.map((item) => (
+                   <span key={item.id} className="hover:text-white transition-colors">
+                     [{new Date(item.release_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}] {item.title?.toUpperCase()} - EP {item.episode || 1} {item.platform?.toUpperCase() || 'OUT NOW'}
+                   </span>
+                 ))
+               ) : (
+                 <>
+                   <span>[14:00] ONE PIECE - EP 1106 OUT NOW</span>
+                   <span>[16:30] SLIME S3 - EP 07 NEXT IN 2H 15M</span>
+                   <span>[21:00] MASHLE S2 FINALE - STREAMING SOON</span>
+                   <span>[00:00] NEW MANGA UPDATE - JUJUTSU KAISEN CH 260</span>
+                 </>
+               )}
+               <span className="text-red-500 font-bold">[ACTIVE] 12,402 NODES ONLINE</span>
             </motion.div>
           </div>
           <div className="ml-4 flex gap-4 items-center shrink-0">
@@ -279,6 +435,178 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </footer>
+
+        {/* Dynamic Slide-out Drawer Panel for managing trackerReleases */}
+        {isReleaseTrackerDrawerOpen && (
+          <>
+            {/* Overlay background */}
+            <div 
+              className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 transition-opacity"
+              onClick={() => {
+                setIsReleaseTrackerDrawerOpen(false);
+                setIsAddingTracker(false);
+                setEditingTrackerId(null);
+              }}
+            />
+            <aside className="fixed inset-y-0 right-0 z-50 w-96 bg-[#0c0c0c] border-l border-white/10 shadow-2xl flex flex-col font-mono animate-slide-in text-gray-300">
+              <div className="p-5 border-b border-white/5 flex items-center justify-between bg-black/40">
+                <div className="flex items-center gap-2">
+                  <Flame size={16} className="text-[#FF0000] animate-pulse" />
+                  <span className="text-[11px] font-black uppercase text-white tracking-widest">Tracker Control Node</span>
+                </div>
+                <button 
+                  onClick={() => {
+                    setIsReleaseTrackerDrawerOpen(false);
+                    setIsAddingTracker(false);
+                    setEditingTrackerId(null);
+                  }}
+                  className="p-1.5 hover:bg-white/5 rounded text-gray-500 hover:text-white transition-colors"
+                  title="Disconnect Control Panel"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* List and Form content */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
+                {isAddingTracker || editingTrackerId ? (
+                  <form onSubmit={handleSaveTracker} className="p-4 bg-black border border-white/5 rounded-lg space-y-4 shadow-inner">
+                    <div className="text-[9px] font-black uppercase text-red-500 tracking-wider">
+                      {editingTrackerId ? 'Modify Event Stream' : 'Initialize Event Stream'}
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[8px] text-gray-500 uppercase font-black">Event Title</label>
+                      <input 
+                        required
+                        value={trackerForm.title}
+                        onChange={(e) => setTrackerForm({ ...trackerForm, title: e.target.value })}
+                        placeholder="e.g. ONE PIECE"
+                        className="w-full bg-[#111] border border-white/10 rounded p-2 text-xs focus:border-red-600 outline-none text-white font-mono"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[8px] text-gray-500 uppercase font-black tracking-wider block">Release Date / Time</label>
+                      <input 
+                        type="datetime-local"
+                        required
+                        value={trackerForm.release_date}
+                        onChange={(e) => setTrackerForm({ ...trackerForm, release_date: e.target.value })}
+                        className="w-full bg-[#111] border border-white/10 rounded p-2 text-xs focus:border-red-600 outline-none text-white font-mono"
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-[8px] text-gray-500 uppercase font-black">Episode #</label>
+                        <input 
+                          type="number"
+                          min="1"
+                          value={trackerForm.episode}
+                          onChange={(e) => setTrackerForm({ ...trackerForm, episode: Number(e.target.value) || 1 })}
+                          className="w-full bg-[#111] border border-white/10 rounded p-2 text-xs focus:border-red-600 outline-none text-white font-mono"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-[8px] text-gray-500 uppercase font-black">Status/Phase</label>
+                        <input 
+                          value={trackerForm.platform}
+                          onChange={(e) => setTrackerForm({ ...trackerForm, platform: e.target.value })}
+                          placeholder="e.g. NEXT IN 2H"
+                          className="w-full bg-[#111] border border-white/10 rounded p-2 text-xs focus:border-red-600 outline-none text-white font-mono"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex gap-2 pt-2">
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          setIsAddingTracker(false);
+                          setEditingTrackerId(null);
+                          setTrackerForm({ title: '', release_date: '', episode: 1, platform: 'OUT NOW' });
+                        }}
+                        className="flex-1 py-1.5 bg-white/5 hover:bg-white/10 text-[9px] font-black uppercase tracking-widest rounded transition-colors text-gray-400 font-mono text-[9px]"
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        type="submit" 
+                        className="flex-1 py-1.5 bg-[#FF0000] hover:bg-[#CC0000] text-white text-[9px] font-black uppercase tracking-widest rounded transition-all shadow-[0_0_15px_rgba(255,0,0,0.3)]"
+                      >
+                        Sync Stream
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsAddingTracker(true);
+                      setTrackerForm({ title: '', release_date: '', episode: 1, platform: 'OUT NOW' });
+                    }}
+                    className="w-full py-2 bg-red-650/10 text-red-500 hover:text-white border border-red-600/20 hover:bg-red-600 transition-all text-[9.5px] font-black uppercase tracking-widest rounded-lg flex items-center justify-center gap-1.5 hover:shadow-[0_0_15px_rgba(255,0,0,0.2)]"
+                  >
+                    <Flame size={12} fill="currentColor text-[10px]" /> Initialize New Release
+                  </button>
+                )}
+
+                {/* Items List */}
+                <div className="space-y-2.5 pt-2">
+                  <div className="text-[9px] font-black uppercase text-gray-500 tracking-wider">Indexed Release Cycles</div>
+                  {trackerReleases.length === 0 ? (
+                    <div className="text-center p-10 border border-dashed border-white/5 rounded-lg text-gray-600 text-[10px] uppercase">
+                      Zero indices active.
+                    </div>
+                  ) : (
+                    trackerReleases.map((item) => (
+                      <div key={item.id} className="p-3 bg-black border border-white/5 hover:border-red-600/20 rounded-lg group transition-all flex flex-col gap-2 relative overflow-hidden">
+                        <div className="flex items-start justify-between">
+                          <div className="max-w-[70%]">
+                            <div className="text-xs font-bold text-white group-hover:text-red-500 transition-colors uppercase truncate">{item.title}</div>
+                            <div className="text-[8px] text-gray-500 font-mono mt-0.5 uppercase">
+                              EPISODE {item.episode || 1} • {item.platform || 'OUT NOW'}
+                            </div>
+                          </div>
+                          <span className="text-[8px] bg-red-600/10 text-red-500 font-black px-1.5 py-0.5 rounded uppercase self-start leading-none tracking-widest">
+                            {new Date(item.release_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                          </span>
+                        </div>
+                        
+                        {/* Action Tools */}
+                        <div className="flex justify-end gap-1.5 border-t border-white/5 pt-1.5 opacity-60 group-hover:opacity-100 transition-opacity">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const dateObj = new Date(item.release_date);
+                              const tzOffset = dateObj.getTimezoneOffset() * 60000;
+                              const localISODate = new Date(dateObj.getTime() - tzOffset).toISOString().slice(0, 16);
+                              
+                              setEditingTrackerId(item.id);
+                              setTrackerForm({
+                                title: item.title,
+                                release_date: localISODate,
+                                episode: item.episode || 1,
+                                platform: item.platform || 'OUT NOW'
+                              });
+                            }}
+                            className="px-2 py-0.5 hover:bg-white/5 rounded text-[8px] uppercase tracking-widest text-[#FF0000] hover:text-red-450 transition-colors font-black"
+                          >
+                            Modify
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteTracker(item.id)}
+                            className="px-2 py-0.5 hover:bg-red-600/10 rounded text-[8px] uppercase tracking-widest text-gray-600 hover:text-[#FF0000] transition-all font-black"
+                          >
+                            Purge
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </aside>
+          </>
+        )}
       </div>
     </div>
   );

@@ -3,9 +3,11 @@ import { motion } from 'motion/react';
 import { User, Mail, Shield, Save, Camera, ArrowLeft, Upload, Loader2 } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../lib/firebase';
 
 export default function Profile() {
-  const [session, setSession] = useState<any>(null);
+  const [fbUser, setFbUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [form, setForm] = useState({ username: '', avatar_url: '' });
   const [loading, setLoading] = useState(true);
@@ -16,34 +18,58 @@ export default function Profile() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (!session) {
+    const unsubscribeFirebase = onAuthStateChanged(auth, (user) => {
+      if (!user) {
         navigate('/auth');
         return;
       }
-      setSession(session);
-      fetchProfile(session.user.id);
+      setFbUser(user);
+      fetchProfileById(user.uid);
     });
+
+    return () => unsubscribeFirebase();
   }, []);
 
-  const fetchProfile = async (id: string) => {
-    const { data } = await supabase.from('profiles').select('*').eq('id', id).single();
-    if (data) {
-      setProfile(data);
-      setForm({ username: data.username || '', avatar_url: data.avatar_url || '' });
+  useEffect(() => {
+    const handleProfileUpdate = () => {
+      if (fbUser?.uid) {
+        fetchProfileById(fbUser.uid);
+      }
+    };
+
+    window.addEventListener('profiles-updated', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('profiles-updated', handleProfileUpdate);
+    };
+  }, [fbUser]);
+
+  const fetchProfileById = async (userId: string) => {
+    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    let profileData = data;
+    const currentEmail = auth.currentUser?.email || fbUser?.email;
+    if (currentEmail === 'anshsureshsingh07@gmail.com') {
+      if (profileData) {
+        profileData = { ...profileData, role: 'admin' };
+      } else {
+        profileData = { id: userId, username: currentEmail.split('@')[0], role: 'admin', avatar_url: '' };
+      }
+    }
+    if (profileData) {
+      setProfile(profileData);
+      setForm({ username: profileData.username || '', avatar_url: profileData.avatar_url || '' });
     }
     setLoading(false);
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !session) return;
+    if (!file || !fbUser || !profile) return;
 
     setUploading(true);
     setMsg({ type: '', text: '' });
 
     const fileExt = file.name.split('.').pop();
-    const filePath = `${session.user.id}/${Math.random()}.${fileExt}`;
+    const filePath = `${profile.id}/${Math.random()}.${fileExt}`;
 
     const { error: uploadError } = await supabase.storage
       .from('avatars')
@@ -66,19 +92,21 @@ export default function Profile() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!profile) return;
     setSaving(true);
     setMsg({ type: '', text: '' });
 
     const { error } = await supabase
       .from('profiles')
       .update({ username: form.username, avatar_url: form.avatar_url })
-      .eq('id', session.user.id);
+      .eq('id', profile.id);
 
     if (error) {
       setMsg({ type: 'error', text: 'Error syncing with neural network.' });
     } else {
       setMsg({ type: 'success', text: 'Neural identity updated successfully.' });
-      fetchProfile(session.user.id);
+      fetchProfileById(fbUser?.uid || profile.id);
+      window.dispatchEvent(new Event('profiles-updated'));
     }
     setSaving(false);
   };
@@ -96,7 +124,7 @@ export default function Profile() {
           <div className="relative group">
             <div className="w-32 h-32 rounded-full border-2 border-red-600/30 overflow-hidden bg-black/40 shadow-[0_0_30px_rgba(220,38,38,0.1)]">
               <img 
-                src={form.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${session?.user.id}`} 
+                src={form.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${fbUser?.uid}`} 
                 className="w-full h-full object-cover" 
               />
             </div>
@@ -129,7 +157,7 @@ export default function Profile() {
                 Sector: {profile?.role?.toUpperCase() || 'MEMBER'}
               </span>
               <span className="text-[10px] font-mono text-red-500 uppercase tracking-widest px-3 py-1 bg-red-500/5 rounded-full border border-red-500/10">
-                Node ID: {session?.user.id.slice(0, 8)}
+                Node ID: {profile?.id?.slice(0, 8) || 'GENERIC'}
               </span>
             </div>
           </div>
@@ -168,7 +196,7 @@ export default function Profile() {
               </label>
               <input 
                 disabled
-                value={session?.user.email}
+                value={fbUser?.email || ''}
                 className="w-full bg-black/20 border border-white/5 rounded-xl p-4 text-sm font-mono opacity-30 cursor-not-allowed text-gray-500"
               />
             </div>
@@ -223,7 +251,9 @@ export default function Profile() {
            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               <div className="space-y-1">
                 <span className="text-[8px] font-mono text-gray-600 uppercase">Last Sync</span>
-                <p className="text-[10px] font-bold text-gray-400 uppercase">{new Date(session?.user?.last_sign_in_at).toLocaleString()}</p>
+                <p className="text-[10px] font-bold text-gray-400 uppercase">
+                  {fbUser?.metadata?.lastSignInTime ? new Date(fbUser.metadata.lastSignInTime).toLocaleString() : 'N/A'}
+                </p>
               </div>
               <div className="space-y-1">
                 <span className="text-[8px] font-mono text-gray-600 uppercase">Authorization</span>

@@ -126,7 +126,7 @@ export default function AnimeDatabase() {
             className="group cursor-pointer"
           >
             <div className="relative aspect-[3/4] rounded-lg overflow-hidden border-2 border-red-600/20 mb-3 bg-black">
-              <img src={anime.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+              <img src={anime.image || undefined} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
               <div className="absolute top-2 left-2 bg-red-600 text-[8px] font-black text-white px-2 py-1 rounded uppercase tracking-widest shadow-xl">Nexus Node</div>
               <div className="absolute bottom-2 right-2 bg-black/80 px-1.5 py-0.5 rounded text-[8px] font-black text-white flex items-center gap-1 uppercase">
                 <Star size={8} className="text-red-600" fill="currentColor" /> {anime.rating || 'N/A'}

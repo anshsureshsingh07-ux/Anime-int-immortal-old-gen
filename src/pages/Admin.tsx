@@ -5,6 +5,8 @@ import {
   AlertCircle, CheckCircle2, XCircle, Upload, Clock
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth } from '../lib/firebase';
 
 export default function Admin() {
   const [session, setSession] = useState<any>(null);
@@ -18,6 +20,12 @@ export default function Admin() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const unsubscribeFirebase = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        fetchProfile(user.uid);
+      }
+    });
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session?.user) fetchProfile(session.user.id);
@@ -30,7 +38,24 @@ export default function Admin() {
     fetchReleases();
     fetchPolls();
     cleanupOldNews();
+
+    return () => unsubscribeFirebase();
   }, []);
+
+  useEffect(() => {
+    const handleProfileUpdate = () => {
+      const currentAuthedId = session?.user?.id || auth.currentUser?.uid;
+      if (currentAuthedId) {
+        fetchProfile(currentAuthedId);
+      }
+      fetchUsers();
+    };
+
+    window.addEventListener('profiles-updated', handleProfileUpdate);
+    return () => {
+      window.removeEventListener('profiles-updated', handleProfileUpdate);
+    };
+  }, [session]);
 
   const fetchAnime = async () => {
     const { data } = await supabase.from('anime').select('*').order('created_at', { ascending: false });
@@ -106,7 +131,18 @@ export default function Admin() {
 
   const updateUserRole = async (id: string, role: string) => {
     const { error } = await supabase.from('profiles').update({ role }).eq('id', id);
-    if (!error) fetchUsers();
+    if (!error) {
+      fetchUsers();
+      const currentAuthedId = session?.user?.id || auth.currentUser?.uid;
+      if (id === currentAuthedId) {
+        if (dbUser) {
+          setDbUser({ ...dbUser, role });
+        }
+      }
+      window.dispatchEvent(new Event('profiles-updated'));
+    } else {
+      console.error('Error updating user role:', error);
+    }
   };
 
   // Forms
@@ -411,7 +447,7 @@ export default function Admin() {
                         <div key={item.id} className="flex items-center justify-between p-4 cyber-card hover:bg-white/[0.02] transition-all group">
                           <div className="flex gap-4 items-center">
                               <div className="w-16 h-12 overflow-hidden rounded border border-white/10 relative">
-                                <img src={item.image} className="w-full h-full object-cover group-hover:scale-125 transition-transform duration-500" />
+                                <img src={item.image || undefined} className="w-full h-full object-cover group-hover:scale-125 transition-transform duration-500" />
                               </div>
                               <div>
                                 <h4 className="text-xs font-bold uppercase text-white group-hover:text-red-500 transition-colors">{item.title}</h4>
@@ -472,7 +508,7 @@ export default function Admin() {
                     {anime.map(item => (
                       <div key={item.id} className="flex items-center justify-between p-4 cyber-card">
                         <div className="flex gap-4 items-center">
-                          <img src={item.image} className="w-10 h-14 object-cover rounded border border-white/10" />
+                          <img src={item.image || undefined} className="w-10 h-14 object-cover rounded border border-white/10" />
                           <div>
                             <h4 className="text-xs font-bold uppercase">{item.title}</h4>
                             <span className="text-[8px] font-mono text-gray-600 uppercase">{item.status} • {item.rating}★</span>

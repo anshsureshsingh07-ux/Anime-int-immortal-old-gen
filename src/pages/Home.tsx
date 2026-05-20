@@ -3,6 +3,8 @@ import { motion } from 'motion/react';
 import { Flame, TrendingUp, Calendar, Play, ChevronRight, MessageSquare, Heart } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { auth } from '../lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 export default function Home() {
   const [news, setNews] = useState<any[]>([]);
@@ -13,8 +15,44 @@ export default function Home() {
   const [userVote, setUserVote] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // New robust states for the dynamic features
+  const [breakingNews, setBreakingNews] = useState<any>({
+    id: 1,
+    text: "Vanguard Ops: Archives System Expansion Initialized"
+  });
+  const [isEditingBreaking, setIsEditingBreaking] = useState(false);
+  const [tempBreakingText, setTempBreakingText] = useState('');
+
+  const [communityPoll, setCommunityPoll] = useState<any>({
+    id: 1,
+    question: "Should the Nexus terminal undergo full decentralization?",
+    option_a: "EXECUTE DECENTRALIZATION",
+    option_b: "MAINTAIN CENTRAL CORES",
+    votes_a: 104,
+    votes_b: 42
+  });
+  const [votedOption, setVotedOption] = useState<string | null>(null);
+  const [showPollEdit, setShowPollEdit] = useState(false);
+  const [pollEditForm, setPollEditForm] = useState({ question: '', option_a: '', option_b: '' });
+
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const isCurrentUserAdmin = currentUserEmail === 'anshsureshsingh07@gmail.com';
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUserEmail(user ? user.email : null);
+    });
+    return () => unsubscribe();
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
+
+    // Load local stored vote for the community poll
+    const savedVote = localStorage.getItem('voted_community_poll_1');
+    if (savedVote) {
+      setVotedOption(savedVote);
+    }
 
     const fetchData = async () => {
       // News
@@ -30,11 +68,10 @@ export default function Home() {
       const { data: releaseData } = await supabase
         .from('release_tracker')
         .select('*')
-        .gte('release_date', new Date().toISOString())
         .order('release_date', { ascending: true })
         .limit(10);
 
-      // Poll
+      // Polls (Legacy poll)
       const { data: pollData } = await supabase
         .from('polls')
         .select('*, poll_options(*)')
@@ -42,6 +79,53 @@ export default function Home() {
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
+
+      // Dynamic Feature 1: Get Breaking News (id: 1)
+      try {
+        const { data: bnData, error: bnErr } = await supabase
+          .from('breaking_news')
+          .select('*')
+          .eq('id', 1)
+          .single();
+
+        if (bnData) {
+          if (isMounted) setBreakingNews(bnData);
+        } else if (bnErr && bnErr.code === 'PGRST116') {
+          // Record doesn't exist, try initializing it
+          const defaultBN = { id: 1, text: "Vanguard Ops: Archives System Expansion Initialized" };
+          const { data: insertedBN } = await supabase.from('breaking_news').insert([defaultBN]).select().single();
+          if (insertedBN && isMounted) setBreakingNews(insertedBN);
+        }
+      } catch (err) {
+        console.warn('Unable to query breaking_news:', err);
+      }
+
+      // Dynamic Feature 3: Get Community Poll (id: 1)
+      try {
+        const { data: cpData, error: cpErr } = await supabase
+          .from('community_poll')
+          .select('*')
+          .eq('id', 1)
+          .single();
+
+        if (cpData) {
+          if (isMounted) setCommunityPoll(cpData);
+        } else if (cpErr && cpErr.code === 'PGRST116') {
+          // Record doesn't exist, initialize it
+          const defaultPoll = {
+            id: 1,
+            question: "Should the Nexus terminal undergo full decentralization?",
+            option_a: "EXECUTE DECENTRALIZATION",
+            option_b: "MAINTAIN CENTRAL CORES",
+            votes_a: 104,
+            votes_b: 42
+          };
+          const { data: insertedCP } = await supabase.from('community_poll').insert([defaultPoll]).select().single();
+          if (insertedCP && isMounted) setCommunityPoll(insertedCP);
+        }
+      } catch (err) {
+        console.warn('Unable to query community_poll:', err);
+      }
       
       if (isMounted) {
         if (newsData) setNews(newsData);
@@ -82,6 +166,85 @@ export default function Home() {
 
     return () => { isMounted = false; };
   }, []);
+
+  const handleSaveBreaking = async () => {
+    const value = tempBreakingText.trim();
+    if (!value) return;
+
+    try {
+      const payload = {
+        id: 1,
+        text: value,
+        title: value,
+        content: value
+      };
+      
+      const { error } = await supabase.from('breaking_news').upsert([payload]);
+      if (error) {
+        // Fallback update in case of column schema mismatch or triggers
+        await supabase.from('breaking_news').update({ text: value }).eq('id', 1);
+      }
+      setBreakingNews({ ...breakingNews, text: value });
+      setIsEditingBreaking(false);
+    } catch (err) {
+      console.error('Error saving breaking_news:', err);
+      // Fallback local state update
+      setBreakingNews({ ...breakingNews, text: value });
+      setIsEditingBreaking(false);
+    }
+  };
+
+  const handleCommunityVote = async (option: 'A' | 'B') => {
+    if (votedOption || !communityPoll) return;
+
+    localStorage.setItem('voted_community_poll_1', option);
+    setVotedOption(option);
+
+    try {
+      // Load latest values to prevent dirty writes or collisions
+      const { data: latest } = await supabase.from('community_poll').select('*').eq('id', 1).single();
+      const votesA = latest ? (latest.votes_a || 0) : (communityPoll.votes_a || 0);
+      const votesB = latest ? (latest.votes_b || 0) : (communityPoll.votes_b || 0);
+
+      const updatePayload = option === 'A' 
+        ? { votes_a: votesA + 1 }
+        : { votes_b: votesB + 1 };
+
+      const { data } = await supabase
+        .from('community_poll')
+        .update(updatePayload)
+        .eq('id', 1)
+        .select()
+        .single();
+
+      if (data) {
+        setCommunityPoll(data);
+      } else {
+        setCommunityPoll({
+          ...communityPoll,
+          votes_a: option === 'A' ? votesA + 1 : votesA,
+          votes_b: option === 'B' ? votesB + 1 : votesB,
+        });
+      }
+    } catch (err) {
+      console.error('Error recording community vote:', err);
+      // fallback in-memory
+      setCommunityPoll({
+        ...communityPoll,
+        votes_a: option === 'A' ? (communityPoll.votes_a || 0) + 1 : (communityPoll.votes_a || 0),
+        votes_b: option === 'B' ? (communityPoll.votes_b || 0) + 1 : (communityPoll.votes_b || 0),
+      });
+    }
+  };
+
+  const getCommunityPollPercentage = (option: 'A' | 'B') => {
+    if (!communityPoll) return 50;
+    const votesA = communityPoll.votes_a || 0;
+    const votesB = communityPoll.votes_b || 0;
+    const total = votesA + votesB;
+    if (total === 0) return 50;
+    return Math.round((option === 'A' ? votesA : votesB) / total * 100);
+  };
 
   const fetchPollVotes = async (pollId: string) => {
     const { data: votes } = await supabase.from('poll_votes').select('*').eq('poll_id', pollId);
@@ -151,9 +314,52 @@ export default function Home() {
               <span className="bg-black/60 text-white text-[10px] font-black px-2 py-1 uppercase rounded backdrop-blur-md">Featured</span>
             </div>
             <div className="absolute bottom-8 left-8 right-8 z-20">
-              <h2 className="text-3xl font-black text-white leading-tight uppercase italic drop-shadow-lg leading-snug">
-                Vanguard Ops: Archives <br/>System Expansion Initialized
-              </h2>
+              {isEditingBreaking ? (
+                <div className="flex flex-col gap-2 bg-[#050505]/95 p-4 rounded-xl border border-red-600/50 backdrop-blur-md shadow-[0_0_30px_rgba(220,38,38,0.2)]">
+                  <span className="text-[9px] font-mono uppercase text-[#FF0000] tracking-widest font-black">Syncing Node Terminal Ticker</span>
+                  <textarea
+                    value={tempBreakingText}
+                    onChange={(e) => setTempBreakingText(e.target.value)}
+                    className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-xs font-mono text-white focus:border-red-600 outline-none"
+                    rows={2}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingBreaking(false)}
+                      className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-[10px] font-black uppercase rounded text-gray-400 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSaveBreaking}
+                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-[10px] font-black uppercase rounded text-white transition-all shadow-[0_0_15px_rgba(220,38,38,0.4)]"
+                    >
+                      Sync Banner
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="group/banner flex items-start justify-between gap-4">
+                  <h2 className="text-3xl font-black text-white leading-tight uppercase italic drop-shadow-lg leading-snug">
+                    {breakingNews?.text || breakingNews?.title || "Vanguard Ops: Archives System Expansion Initialized"}
+                  </h2>
+                  {isCurrentUserAdmin && (
+                    <button
+                      onClick={() => {
+                        setTempBreakingText(breakingNews?.text || breakingNews?.title || "Vanguard Ops: Archives System Expansion Initialized");
+                        setIsEditingBreaking(true);
+                      }}
+                      className="p-2 bg-black/60 hover:bg-red-600 text-white rounded-lg border border-white/10 hover:border-red-600/50 transition-all flex items-center justify-center shrink-0 self-center shadow-lg"
+                      title="Edit Terminal Banner"
+                    >
+                      <span className="text-[9px] font-black uppercase tracking-widest mr-1.5 hidden md:inline">Edit Banner</span>
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-pencil"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="flex items-center gap-4 mt-3 text-xs text-gray-300 font-medium">
                 <span>Network Node 01</span>
                 <span className="text-[#FF0000]">•</span>
@@ -251,49 +457,164 @@ export default function Home() {
           </section>
 
           <section className="bg-[#111] rounded-xl border border-[#1F1F1F] p-5">
-             <h3 className="text-xs font-black uppercase tracking-widest text-[#FF0000] mb-4 flex items-center gap-2">
-               <MessageSquare size={14} /> Community Poll
+             <h3 className="text-xs font-black uppercase tracking-widest text-[#FF0000] mb-4 flex items-center justify-between">
+               <span className="flex items-center gap-2"><MessageSquare size={14} /> Community Poll</span>
+               {isCurrentUserAdmin && (
+                 <button 
+                   type="button"
+                   onClick={() => {
+                     setPollEditForm({
+                       question: communityPoll?.question || '',
+                       option_a: communityPoll?.option_a || '',
+                       option_b: communityPoll?.option_b || ''
+                     });
+                     setShowPollEdit(!showPollEdit);
+                   }}
+                   className="p-1.5 hover:bg-white/5 rounded border border-transparent hover:border-white/10 text-gray-500 hover:text-[#FF0000] transition-all"
+                   title="Edit Poll Settings"
+                 >
+                   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-settings"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                 </button>
+               )}
              </h3>
-             {activePoll ? (
-               <div className="space-y-4">
-                  <p className="text-xs text-gray-400 font-medium">{activePoll.question}</p>
+
+             {isCurrentUserAdmin && showPollEdit ? (
+                <form 
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    try {
+                      const payload = {
+                        id: 1,
+                        question: pollEditForm.question,
+                        option_a: pollEditForm.option_a,
+                        option_b: pollEditForm.option_b,
+                        votes_a: 0,
+                        votes_b: 0
+                      };
+                      const { data } = await supabase.from('community_poll').upsert([payload]).select().single();
+                      if (data) {
+                        setCommunityPoll(data);
+                      } else {
+                        await supabase.from('community_poll').update({
+                          question: pollEditForm.question,
+                          option_a: pollEditForm.option_a,
+                          option_b: pollEditForm.option_b,
+                          votes_a: 0,
+                          votes_b: 0
+                        }).eq('id', 1);
+                        setCommunityPoll({
+                          ...communityPoll,
+                          ...pollEditForm,
+                          votes_a: 0,
+                          votes_b: 0
+                        });
+                      }
+                      localStorage.removeItem('voted_community_poll_1');
+                      setVotedOption(null);
+                      setShowPollEdit(false);
+                    } catch (err) {
+                      console.error('Error saving poll config:', err);
+                      setCommunityPoll({
+                        ...communityPoll,
+                        ...pollEditForm,
+                        votes_a: 0,
+                        votes_b: 0
+                      });
+                      localStorage.removeItem('voted_community_poll_1');
+                      setVotedOption(null);
+                      setShowPollEdit(false);
+                    }
+                  }}
+                  className="space-y-3 bg-black/40 p-3.5 rounded-lg border border-white/5 font-mono text-xs shadow-inner"
+                >
+                  <div className="text-[10px] text-[#FF0000] uppercase font-black tracking-widest">Configure Consensus Core</div>
+                  <div>
+                    <label className="text-[8px] text-gray-500 uppercase font-black tracking-wider block mb-1">Poll Question</label>
+                    <input 
+                      required
+                      value={pollEditForm.question}
+                      onChange={e => setPollEditForm({...pollEditForm, question: e.target.value})}
+                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-md p-2 focus:border-[#FF0000] outline-none text-white text-[11px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[8px] text-gray-500 uppercase font-black tracking-wider block mb-1">Option A</label>
+                    <input 
+                      required
+                      value={pollEditForm.option_a}
+                      onChange={e => setPollEditForm({...pollEditForm, option_a: e.target.value})}
+                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-md p-2 focus:border-[#FF0000] outline-none text-white text-[11px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[8px] text-gray-500 uppercase font-black tracking-wider block mb-1">Option B</label>
+                    <input 
+                      required
+                      value={pollEditForm.option_b}
+                      onChange={e => setPollEditForm({...pollEditForm, option_b: e.target.value})}
+                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-md p-2 focus:border-[#FF0000] outline-none text-white text-[11px]"
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1.5">
+                    <button 
+                      type="button" 
+                      onClick={() => setShowPollEdit(false)}
+                      className="flex-1 py-1.5 bg-white/5 hover:bg-white/10 text-[9px] font-black uppercase tracking-widest rounded transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button 
+                      type="submit" 
+                      className="flex-1 py-1.5 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black uppercase tracking-widest rounded transition-all shadow-[0_0_10px_rgba(220,38,38,0.2)]"
+                    >
+                      Sync Core
+                    </button>
+                  </div>
+                </form>
+             ) : communityPoll ? (
+                <div className="space-y-4">
+                  <p className="text-xs text-gray-400 font-medium leading-relaxed">{communityPoll.question}</p>
                   <div className="space-y-3">
-                     {activePoll.poll_options.map((option: any) => {
-                       const percent = getVotePercent(option.id);
-                       const isMyVote = userVote === option.id;
-                       return (
-                        <button 
-                          key={option.id}
-                          disabled={userVote !== null}
-                          onClick={() => handleVote(option.id)}
-                          className={`relative h-11 w-full bg-[#050505] border rounded flex items-center px-4 group overflow-hidden transition-all text-left ${
-                            isMyVote ? 'border-red-600' : 'border-[#1F1F1F] hover:border-gray-500'
-                          }`}
-                        >
-                           <div 
-                             className="absolute inset-y-0 left-0 bg-red-600/10 transition-all duration-1000" 
-                             style={{ width: `${percent}%` }}
-                           />
-                           <span className={`relative z-10 text-[11px] font-black italic uppercase tracking-tighter transition-colors ${
-                             isMyVote ? 'text-red-500' : 'text-white'
-                           }`}>
-                             {option.text}
-                           </span>
-                           {userVote !== null && (
-                             <span className="relative z-10 ml-auto text-[10px] font-mono text-[#FF0000] font-black">{percent}%</span>
-                           )}
-                        </button>
-                       );
+                     {['A', 'B'].map((optKey) => {
+                        const optText = optKey === 'A' ? communityPoll.option_a : communityPoll.option_b;
+                        const percent = getCommunityPollPercentage(optKey as any);
+                        const isMyVote = votedOption === optKey;
+                        const votesCount = optKey === 'A' ? (communityPoll.votes_a || 0) : (communityPoll.votes_b || 0);
+                        return (
+                          <button 
+                            key={optKey}
+                            disabled={votedOption !== null}
+                            onClick={() => handleCommunityVote(optKey as any)}
+                            className={`relative h-12 w-full bg-[#050505] border rounded-lg flex items-center px-4 group overflow-hidden transition-all text-left ${
+                              isMyVote ? 'border-red-600 shadow-[0_0_15px_rgba(220,38,38,0.15)]' : 'border-[#1F1F1F] hover:border-gray-500'
+                            }`}
+                          >
+                             <div 
+                               className="absolute inset-y-0 left-0 bg-red-600/10 transition-all duration-1000" 
+                               style={{ width: `${percent}%` }}
+                             />
+                             <span className={`relative z-10 text-[11px] font-black italic uppercase tracking-tighter transition-colors ${
+                               isMyVote ? 'text-red-500' : 'text-white'
+                             }`}>
+                               {optText}
+                             </span>
+                             {votedOption !== null && (
+                               <span className="relative z-10 ml-auto text-[10px] font-mono text-[#FF0000] font-black">
+                                 {percent}% ({votesCount}v)
+                               </span>
+                             )}
+                          </button>
+                        );
                      })}
                   </div>
-                  {userVote !== null && (
+                  {votedOption !== null && (
                     <p className="text-[8px] font-mono text-gray-600 uppercase tracking-widest text-center mt-4"> Consensus Data Recorded </p>
                   )}
-               </div>
+                </div>
              ) : (
-               <div className="p-10 text-center border border-dashed border-white/5 rounded-xl">
-                 <p className="text-[10px] text-gray-600 font-mono uppercase">Analyzing Consensus...</p>
-               </div>
+                <div className="p-10 text-center border border-dashed border-white/5 rounded-xl">
+                  <p className="text-[10px] text-gray-600 font-mono uppercase">Analyzing Consensus...</p>
+                </div>
              )}
           </section>
 
