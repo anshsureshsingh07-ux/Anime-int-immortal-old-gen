@@ -25,7 +25,7 @@ import { motion } from 'motion/react';
 import { supabase } from './lib/supabase';
 import { Navigate } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { auth } from './lib/firebase';
+import { auth, registerPushNotifications } from './lib/firebase';
 
 // Pages
 import Home from './pages/Home';
@@ -38,6 +38,8 @@ import ResetPassword from './pages/ResetPassword';
 import News from './pages/News';
 import Profile from './pages/Profile';
 import NewsDetail from './pages/NewsDetail';
+import LegalPage from './pages/Legal';
+import EmailVerificationPage from './pages/EmailVerification';
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -128,6 +130,9 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       setLoadingAuth(false);
       if (user?.uid) {
         fetchProfileById(user.uid);
+        registerPushNotifications(user.uid).catch((err) => {
+          console.warn('Error self-registering push notifications:', err);
+        });
       } else if (user?.email) {
         fetchProfileByEmail(user.email);
       } else {
@@ -136,17 +141,23 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     });
 
     // Supabase session listener for RLS / Supabase features
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSupabaseSession(session);
+    supabase.auth.getSession().then((res) => {
+      setSupabaseSession(res?.data?.session || null);
+    }).catch((err) => {
+      console.warn('Failed to load initial Supabase session:', err);
+      setSupabaseSession(null);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSupabaseSession(session);
+    const listener = supabase.auth.onAuthStateChange((_event, session) => {
+      setSupabaseSession(session || null);
     });
+    const subscription = listener?.data?.subscription || (listener as any)?.subscription;
 
     return () => {
       unsubscribeFirebase();
-      subscription.unsubscribe();
+      if (subscription && typeof subscription.unsubscribe === 'function') {
+        subscription.unsubscribe();
+      }
     };
   }, []);
 
@@ -166,28 +177,87 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   }, [firebaseUser]);
 
   const fetchProfileById = async (userId: string) => {
+    let session = null;
+    try {
+      const res = await supabase.auth.getSession();
+      session = res?.data?.session || null;
+    } catch (e) {
+      console.warn('Failed to get session in fetchProfileById:', e);
+    }
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .single();
     
+    const adminEmails = ['anshsureshsingh07@gmail.com', 'animeintofficial@gmail.com'];
+    const sessionEmail = session?.user?.email || firebaseUser?.email;
+
     if (data) {
       setDbUser(data);
+      if (data.email && adminEmails.includes(data.email.toLowerCase()) && data.role !== 'admin') {
+        console.log('App Startup: Auto-repairing admin profile role by ID...');
+        const { error: updErr } = await supabase.from('profiles').update({ role: 'admin' }).eq('id', userId);
+        if (!updErr) {
+          const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', userId).single();
+          if (freshProfile) setDbUser(freshProfile);
+        }
+      }
+    } else if (error && error.code === 'PGRST116' && sessionEmail && adminEmails.includes(sessionEmail.toLowerCase())) {
+      console.log('App Startup: Admin profile missing entirely, auto-inserting...');
+      const { error: insErr } = await supabase.from('profiles').insert([{ 
+        id: userId, 
+        username: sessionEmail.split('@')[0], 
+        email: sessionEmail, 
+        role: 'admin' 
+      }]);
+      if (!insErr) {
+        const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', userId).single();
+        if (freshProfile) setDbUser(freshProfile);
+      }
     } else if (error && error.code !== 'PGRST116') {
       console.error('Error fetching profile by ID:', error);
     }
   };
 
   const fetchProfileByEmail = async (email: string) => {
+    let session = null;
+    try {
+      const res = await supabase.auth.getSession();
+      session = res?.data?.session || null;
+    } catch (e) {
+      console.warn('Failed to get session in fetchProfileByEmail:', e);
+    }
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('email', email)
       .single();
     
+    const adminEmails = ['anshsureshsingh07@gmail.com', 'animeintofficial@gmail.com'];
+
     if (data) {
       setDbUser(data);
+      if (adminEmails.includes(email.toLowerCase()) && data.role !== 'admin') {
+        console.log('App Startup: Auto-repairing admin profile role by Email...');
+        const { error: updErr } = await supabase.from('profiles').update({ role: 'admin' }).eq('id', data.id);
+        if (!updErr) {
+          const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', data.id).single();
+          if (freshProfile) setDbUser(freshProfile);
+        }
+      }
+    } else if (error && error.code === 'PGRST116' && adminEmails.includes(email.toLowerCase()) && session?.user) {
+      console.log('App Startup: Admin profile missing entirely by Email register, auto-inserting...');
+      const { error: insErr } = await supabase.from('profiles').insert([{ 
+        id: session.user.id, 
+        username: email.split('@')[0], 
+        email: email, 
+        role: 'admin' 
+      }]);
+      if (!insErr) {
+        const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
+        if (freshProfile) setDbUser(freshProfile);
+      }
     } else if (error && error.code !== 'PGRST116') {
       console.error('Error fetching profile:', error);
     }
@@ -627,6 +697,8 @@ export default function App() {
           <Route path="/anime/:id" element={<AnimeDetails />} />
           <Route path="/recruit" element={<Recruitment />} />
           <Route path="/admin" element={<Admin />} />
+          <Route path="/legal" element={<LegalPage />} />
+          <Route path="/auth/verify" element={<EmailVerificationPage />} />
         </Routes>
       </AppLayout>
     </Router>

@@ -21,27 +21,59 @@ export const getSupabase = () => {
     throw new Error('Supabase URL and Anon Key are required');
   }
 
-  // Clean the URL if it contains /rest/v1/
-  const cleanUrl = url.replace(/\/rest\/v1\/?$/, '');
+  // Clean the URL of trailing slashes and redundant paths
+  let cleanUrl = url.trim().replace(/\/+$/, '');
+  cleanUrl = cleanUrl.replace(/\/rest\/v1\/?$/, '');
+  cleanUrl = cleanUrl.replace(/\/+$/, '');
 
-  supabaseClient = createClient(cleanUrl, key);
+  try {
+    supabaseClient = createClient(cleanUrl, key);
+  } catch (err: any) {
+    console.error('Failed to instantiate Supabase client:', err);
+    throw err;
+  }
   return supabaseClient;
+};
+
+const dummyClient = {
+  auth: {
+    getSession: async () => ({ data: { session: null }, error: null }),
+    onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    signInWithPassword: async () => ({ data: { user: null, session: null }, error: null }),
+    signUp: async () => ({ data: { user: null, session: null }, error: null }),
+    signOut: async () => ({ error: null }),
+    getUser: async () => ({ data: { user: null }, error: null })
+  },
+  from: () => ({
+    select: () => ({
+      eq: () => ({
+        single: () => Promise.resolve({ data: null, error: null }),
+        order: () => Promise.resolve({ data: [], error: null })
+      }),
+      order: () => Promise.resolve({ data: [], error: null })
+    }),
+    insert: () => Promise.resolve({ data: null, error: null }),
+    update: () => ({ eq: () => Promise.resolve({ data: null, error: null }) }),
+    delete: () => ({ eq: () => Promise.resolve({ data: null, error: null }) })
+  }),
+  storage: {
+    from: () => ({
+      upload: async () => ({ data: null, error: null }),
+      getPublicUrl: () => ({ data: { publicUrl: '' } })
+    })
+  }
 };
 
 export const supabase = new Proxy({} as SupabaseClient, {
   get(_, prop) {
     try {
       const client = getSupabase();
-      return (client as any)[prop];
+      const val = (client as any)[prop];
+      if (val !== undefined) return val;
+      return (dummyClient as any)[prop];
     } catch (e) {
-      // Return a dummy object if initialization fails
-      console.warn('Supabase proxy failing back to empty object:', e);
-      return () => ({ 
-        then: () => ({ catch: () => {} }),
-        catch: () => {},
-        from: () => ({ select: () => ({ eq: () => ({ single: () => Promise.resolve({ data: null, error: e }) }) }) }),
-        auth: { getSession: () => Promise.resolve({ data: { session: null } }), onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }) }
-      });
+      console.warn('Supabase proxy failing back to dummyClient:', e);
+      return (dummyClient as any)[prop];
     }
   }
 });

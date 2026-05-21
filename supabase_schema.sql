@@ -4,6 +4,7 @@ CREATE TABLE profiles (
   username TEXT UNIQUE,
   email TEXT,
   avatar_url TEXT,
+  profile_photo_url TEXT,
   role TEXT DEFAULT 'member' CHECK (role IN ('member', 'news_writer', 'moderator', 'admin')),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -159,8 +160,12 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('avatars', 'avatars', true)
 ON CONFLICT (id) DO NOTHING;
 
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('profile photo', 'profile photo', true)
+ON CONFLICT (id) DO NOTHING;
+
 -- Storage Policies (Universal helper for public buckets)
-CREATE POLICY "Public Access" ON storage.objects FOR SELECT USING (bucket_id IN ('news', 'avatars'));
+CREATE POLICY "Public Access" ON storage.objects FOR SELECT USING (bucket_id IN ('news', 'avatars', 'profile photo'));
 
 CREATE POLICY "Admin/Writer Storage Access" ON storage.objects FOR ALL 
   TO authenticated
@@ -168,6 +173,17 @@ CREATE POLICY "Admin/Writer Storage Access" ON storage.objects FOR ALL
     (bucket_id = 'news' AND (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role IN ('news_writer', 'admin')) OR (auth.jwt()->>'email') IN ('anshsureshsingh07@gmail.com', 'animeintofficial@gmail.com')))
     OR (bucket_id = 'avatars' AND auth.uid() = (storage.foldername(name))[1]::uuid)
     OR (bucket_id = 'avatars' AND EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  );
+
+CREATE POLICY "Profile Photo Owner Storage Access" ON storage.objects FOR ALL
+  TO authenticated
+  USING (
+    (bucket_id = 'profile photo' AND auth.uid() = (storage.foldername(name))[1]::uuid)
+    OR (bucket_id = 'profile photo' AND EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
+  )
+  WITH CHECK (
+    (bucket_id = 'profile photo' AND auth.uid() = (storage.foldername(name))[1]::uuid)
+    OR (bucket_id = 'profile photo' AND EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
   );
 
 -- 13. Trigger to create profile

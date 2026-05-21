@@ -8,6 +8,15 @@ import { supabase } from '../lib/supabase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = error => reject(error);
+  });
+};
+
 export default function Admin() {
   const [session, setSession] = useState<any>(null);
   const [dbUser, setDbUser] = useState<any>(null);
@@ -214,6 +223,8 @@ export default function Admin() {
     description: '',
     category: 'Trending',
     image: '',
+    youtubeVideoUrl: '',
+    additionalImages: '',
   });
 
   const isAdmin = (currentDbUser && (currentDbUser.role === 'admin' || currentDbUser.role === 'news_writer' || currentDbUser.role === 'moderator')) || 
@@ -231,40 +242,112 @@ export default function Admin() {
     setFormSuccess(false);
 
     try {
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const token = currentSession?.access_token;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
       let imageUrl = newsForm.image;
 
       if (imageFile) {
         setUploading(true);
-        const fileExt = imageFile.name.split('.').pop();
-        const fileName = `${Math.random()}-${Date.now()}.${fileExt}`;
-        const filePath = `${fileName}`;
+        const fileExt = imageFile.name.split('.').pop() || 'png';
+        // Generate a clean, safe filename path using the current timestamp
+        const fileName = `news_${Date.now()}.${fileExt}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from('news')
-          .upload(filePath, imageFile);
+        const base64Data = await fileToBase64(imageFile);
 
-        if (uploadError) {
-          throw new Error(`Upload failed: ${uploadError.message}`);
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            bucket: 'news',
+            fileName,
+            fileData: base64Data,
+            contentType: imageFile.type
+          })
+        });
+
+        if (!response.ok) {
+          const resError = await response.json();
+          throw new Error(resError.error || 'Server upload failed');
         }
 
-        const { data: { publicUrl } } = supabase.storage
-          .from('news')
-          .getPublicUrl(filePath);
-        
+        const { publicUrl } = await response.json();
         imageUrl = publicUrl;
       }
 
-      const { error } = await supabase.from('news').insert([
-        {
-          ...newsForm,
-          image: imageUrl,
-          author_id: session.user.id,
-          author_name: dbUser?.username || session.user.email?.split('@')[0] || 'Vanguard Agent',
-          created_at: new Date().toISOString()
+      const parsedAdditionalImages = newsForm.additionalImages
+        .split('\n')
+        .map(u => u.trim())
+        .filter(u => u.length > 0);
+
+      const meta = {
+        additionalImages: parsedAdditionalImages,
+        youtubeVideoUrl: newsForm.youtubeVideoUrl.trim()
+      };
+      
+      const metaString = `\n\n<!--NEXUS_META:${JSON.stringify(meta)}-->`;
+
+      const insertPayload: any = {
+        title: newsForm.title,
+        description: newsForm.description + metaString,
+        category: newsForm.category,
+        image: imageUrl,
+        author_id: session.user.id,
+        author_name: dbUser?.username || session.user.email?.split('@')[0] || 'Vanguard Agent',
+        created_at: new Date().toISOString()
+      };
+
+      const payloadData = {
+        ...insertPayload,
+        additional_images: parsedAdditionalImages,
+        youtube_video_url: newsForm.youtubeVideoUrl.trim()
+      };
+
+      let dbError = null;
+      try {
+        const response = await fetch('/api/news/create', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ payload: payloadData })
+        });
+        
+        if (!response.ok) {
+          const resError = await response.json();
+          throw new Error(resError.error || 'Server news posting failed');
         }
-      ]);
-      if (error) throw error;
-      setNewsForm({ title: '', description: '', category: 'Trending', image: '' });
+      } catch (err: any) {
+        console.warn('Backend news create route failed or pending, trying fallback guest/direct client-side insert...', err);
+        // Fallback to client-side insert:
+        try {
+          const { error } = await supabase.from('news').insert([payloadData]);
+          dbError = error;
+        } catch (innerErr: any) {
+          dbError = innerErr;
+        }
+
+        if (dbError && (dbError.code === '42703' || dbError.message?.includes('column'))) {
+          console.warn('Altered Supabase column missing on news table, retrying insert with serialized tag fallback...');
+          const { error: fallbackError } = await supabase.from('news').insert([insertPayload]);
+          dbError = fallbackError;
+        }
+
+        if (dbError) throw dbError;
+      }
+
+      setNewsForm({ 
+        title: '', 
+        description: '', 
+        category: 'Trending', 
+        image: '', 
+        youtubeVideoUrl: '', 
+        additionalImages: '' 
+      });
       setImageFile(null);
       setFormSuccess(true);
       fetchNews();
@@ -407,6 +490,31 @@ export default function Admin() {
                        
                        <div className="space-y-2">
                           <label className="text-[10px] font-black uppercase text-gray-500">OR Remote Asset URL</label>
+                        </div>
+
+                        <div className="space-y-2">
+                           <label className="text-[10px] font-black uppercase text-gray-500">YouTube Video Link</label>
+                           <input 
+                               value={newsForm.youtubeVideoUrl}
+                               onChange={e => setNewsForm({...newsForm, youtubeVideoUrl: e.target.value})}
+                               className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg p-3 text-sm font-mono focus:border-red-600 outline-none"
+                               placeholder="e.g. https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                           />
+                        </div>
+
+                        <div className="space-y-2 col-span-1 md:col-span-2">
+                           <label className="text-[10px] font-black uppercase text-gray-500">Additional Gallery Photos (One URL per line)</label>
+                           <textarea 
+                               value={newsForm.additionalImages}
+                               onChange={e => setNewsForm({...newsForm, additionalImages: e.target.value})}
+                               rows={3}
+                               className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg p-3 text-sm font-mono focus:border-red-600 outline-none resize-none"
+                               placeholder="https://images.unsplash.com/photo-1&#10;https://images.unsplash.com/photo-2"
+                           />
+                        </div>
+
+                        <div className="space-y-2">
+                           <label className="text-[10px] font-black uppercase text-gray-500">Remote Asset URL</label>
                           <input 
                               value={newsForm.image}
                               onChange={e => setNewsForm({...newsForm, image: e.target.value})}

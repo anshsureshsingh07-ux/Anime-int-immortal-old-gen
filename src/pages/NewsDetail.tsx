@@ -8,7 +8,64 @@ export default function NewsDetail() {
   const { id } = useParams();
   const [article, setArticle] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [activeImgIndex, setActiveImgIndex] = useState(0);
   const navigate = useNavigate();
+
+  // Helper to extract clean youtube embed URL or ID
+  const getYoutubeEmbedId = (url: string) => {
+    if (!url) return null;
+    if (url.includes('youtube.com/embed/')) {
+      const parts = url.split('youtube.com/embed/');
+      if (parts[1]) {
+        return parts[1].split('?')[0].split('"')[0];
+      }
+    }
+    const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+    const match = url.match(regExp);
+    return (match && match[2].length === 11) ? match[2] : null;
+  };
+
+  let additionalImages: string[] = [];
+  let youtubeVideoUrl = '';
+  let cleanDescription = '';
+
+  if (article) {
+    cleanDescription = article.description || '';
+    
+    // 1. Direct columns check
+    if (article.additional_images && Array.isArray(article.additional_images)) {
+      additionalImages = article.additional_images;
+    } else if (article.additionalImages && Array.isArray(article.additionalImages)) {
+      additionalImages = article.additionalImages;
+    }
+
+    if (article.youtube_video_url) {
+      youtubeVideoUrl = article.youtube_video_url;
+    } else if (article.youtubeVideoUrl) {
+      youtubeVideoUrl = article.youtubeVideoUrl;
+    }
+
+    // 2. Metadata string comment fallback check
+    if (article.description) {
+      const match = article.description.match(/<!--NEXUS_META:(.*?)-->/);
+      if (match) {
+        try {
+          const parsed = JSON.parse(match[1]);
+          if (parsed.additionalImages && additionalImages.length === 0) {
+            additionalImages = parsed.additionalImages;
+          }
+          if (parsed.youtubeVideoUrl && !youtubeVideoUrl) {
+            youtubeVideoUrl = parsed.youtubeVideoUrl;
+          }
+        } catch (e) {
+          console.error("Meta parse error", e);
+        }
+        cleanDescription = article.description.replace(/<!--NEXUS_META:(.*?)-->/, '').trim();
+      }
+    }
+  }
+
+  const embedId = getYoutubeEmbedId(youtubeVideoUrl);
 
   useEffect(() => {
     fetchArticle();
@@ -28,6 +85,7 @@ export default function NewsDetail() {
     }
 
     setArticle(data);
+    setActiveImgIndex(0);
     setLoading(false);
   };
 
@@ -140,13 +198,96 @@ export default function NewsDetail() {
         {/* Article Body */}
         <article className="prose prose-invert max-w-none">
           <div className="space-y-8 text-lg md:text-xl text-gray-300 font-medium leading-relaxed tracking-tight">
-            {article.description?.split('\n').map((paragraph: string, i: number) => (
+            {cleanDescription?.split('\n').map((paragraph: string, i: number) => (
               <p key={i} className={i === 0 ? "text-white first-letter:text-5xl first-letter:font-black first-letter:text-red-600 first-letter:mr-3 first-letter:float-left" : ""}>
                 {paragraph}
               </p>
             ))}
           </div>
         </article>
+
+        {embedId && (
+          <div className="mt-16 mb-20 space-y-6">
+            <h3 className="text-sm font-black uppercase tracking-widest text-[#FF0000] flex items-center gap-2 italic">
+              <span className="w-1.5 h-3 bg-red-600 inline-block"></span>
+              RECONNAISSANCE VIDEO FEED
+            </h3>
+            <div className="relative aspect-video bg-zinc-950 rounded-[2rem] overflow-hidden border border-white/10 shadow-2xl">
+              <iframe
+                className="absolute inset-0 w-full h-full"
+                src={`https://www.youtube.com/embed/${embedId}?modestbranding=1&rel=0&showinfo=0`}
+                title="Vanguard Stream Unit"
+                frameBorder="0"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              ></iframe>
+            </div>
+          </div>
+        )}
+
+        {additionalImages.length > 0 && (
+          <div className="mt-16 mb-20 space-y-6">
+            <h3 className="text-sm font-black uppercase tracking-widest text-[#FF0000] flex items-center gap-2 italic">
+              <span className="w-1.5 h-3 bg-red-600 inline-block"></span>
+              ADDITIONAL SECTOR PHOTOGRAPHY ({additionalImages.length + 1} IMAGES)
+            </h3>
+            
+            {/* Primary Slide Display */}
+            <div className="relative aspect-video bg-zinc-950 rounded-3xl overflow-hidden border border-white/10 group shadow-2xl">
+              <img 
+                src={activeImgIndex === 0 ? article.image : additionalImages[activeImgIndex - 1]} 
+                alt={`Slide ${activeImgIndex}`} 
+                className="w-full h-full object-cover transition-all duration-500"
+              />
+              
+              {/* Navigation Arrows */}
+              <button 
+                onClick={() => setActiveImgIndex((prev) => (prev === 0 ? additionalImages.length : prev - 1))}
+                className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/75 border border-white/10 flex items-center justify-center text-white hover:border-[#FF0000] transition-colors focus:outline-none"
+              >
+                ‹
+              </button>
+              <button 
+                onClick={() => setActiveImgIndex((prev) => (prev === additionalImages.length ? 0 : prev + 1))}
+                className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/75 border border-white/10 flex items-center justify-center text-white hover:border-[#FF0000] transition-colors focus:outline-none"
+              >
+                ›
+              </button>
+              
+              {/* Index counter badge */}
+              <div className="absolute top-4 right-4 bg-black/85 px-3 py-1.5 rounded-full border border-white/10 font-mono text-[10px] text-gray-400">
+                <span className="text-white font-bold">{activeImgIndex + 1}</span> / {additionalImages.length + 1}
+              </div>
+            </div>
+
+            {/* Thumbnail Strip */}
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-red-600 scrollbar-track-zinc-900">
+              {/* Slide 0 is the original main image */}
+              <button 
+                onClick={() => setActiveImgIndex(0)}
+                className={`relative w-24 h-16 rounded-xl overflow-hidden border shrink-0 transition-all ${
+                  activeImgIndex === 0 ? 'border-[#FF0000] scale-105 shadow-md shadow-[#FF0000]/20' : 'border-white/10 hover:border-white/50'
+                }`}
+              >
+                <img src={article.image} className="w-full h-full object-cover" />
+                <div className="absolute bottom-0 right-0 bg-black/85 text-[8px] font-mono px-1">MAIN</div>
+              </button>
+              
+              {additionalImages.map((img, idx) => (
+                <button 
+                  key={idx}
+                  onClick={() => setActiveImgIndex(idx + 1)}
+                  className={`relative w-24 h-16 rounded-xl overflow-hidden border shrink-0 transition-all ${
+                    activeImgIndex === idx + 1 ? 'border-[#FF0000] scale-105 shadow-md shadow-[#FF0000]/20' : 'border-white/10 hover:border-white/50'
+                  }`}
+                >
+                  <img src={img} className="w-full h-full object-cover" />
+                  <div className="absolute bottom-0 right-0 bg-black/85 text-[8px] font-mono px-1">{idx + 1}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Footer Meta */}
         <footer className="mt-24 pt-12 border-t border-white/5">

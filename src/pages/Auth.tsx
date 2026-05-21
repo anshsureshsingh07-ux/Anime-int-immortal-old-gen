@@ -16,13 +16,16 @@ import {
   createUserWithEmailAndPassword, 
   sendPasswordResetEmail,
   GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  sendEmailVerification
 } from 'firebase/auth';
 import { auth } from '../lib/firebase';
+import { Link, useNavigate } from 'react-router-dom';
 
 type AuthMode = 'signin' | 'signup' | 'forgot';
 
 export default function AuthPage() {
+  const navigate = useNavigate();
   const [mode, setMode] = useState<AuthMode>('signin');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -31,6 +34,7 @@ export default function AuthPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
 
   const syncGoogleUserWithSupabase = async (userEmail: string) => {
     const defaultPassword = `N3xusG00gleAuth_${userEmail.split('@')[0]}_Secur3!`;
@@ -89,16 +93,33 @@ export default function AuthPage() {
     setError(null);
     setMessage(null);
 
+    // Validate legal boxes before submitting
+    if (mode === 'signup' && !acceptedTerms) {
+      setError('You must accept the terms & explicitly authorize secure database coordinates recording.');
+      setLoading(false);
+      return;
+    }
+
     try {
       if (mode === 'signup') {
         // Firebase Auth Signup First
+        let userCredential;
         try {
-          await createUserWithEmailAndPassword(auth, email, password);
+          userCredential = await createUserWithEmailAndPassword(auth, email, password);
         } catch (fbErr: any) {
           if (fbErr.code === 'auth/email-already-in-use') {
             throw new Error('User already exists. Please sign in');
           }
           throw fbErr;
+        }
+
+        // Send actual verification code dispatch
+        if (userCredential.user) {
+          try {
+            await sendEmailVerification(userCredential.user);
+          } catch (verErr) {
+            console.error('Email verification trigger failed:', verErr);
+          }
         }
 
         // Implicitly register and log in to Supabase to support current database collections & RLS matching User UI
@@ -116,7 +137,8 @@ export default function AuthPage() {
           console.error('Supabase signup mapping failed:', sbErr);
         }
 
-        setMessage('Check your email for the confirmation link!');
+        // Redirect to new verification workflow
+        navigate(`/auth/verify?email=${encodeURIComponent(email)}`);
       } else if (mode === 'signin') {
         // Firebase Auth Signin
         try {
@@ -280,6 +302,41 @@ export default function AuthPage() {
                     >
                       {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                     </button>
+                  </div>
+                </div>
+              )}
+
+              {mode === 'signup' && (
+                <div className="bg-white/[0.01] border border-[#1F1F1F] p-4 rounded-sm space-y-3">
+                  <div className="flex items-start gap-3">
+                    <input 
+                      type="checkbox"
+                      id="acceptTerms"
+                      required
+                      checked={acceptedTerms}
+                      onChange={(e) => setAcceptedTerms(e.target.checked)}
+                      className="mt-1 w-4 h-4 bg-[#111] border border-[#222] text-[#FF0000] rounded focus:ring-0 focus:ring-offset-0 cursor-pointer accent-[#FF0000]"
+                    />
+                    <label htmlFor="acceptTerms" className="text-[10px] text-gray-500 font-mono tracking-tight leading-normal cursor-pointer select-none">
+                      I have read and agree to both the{' '}
+                      <Link to="/legal" target="_blank" className="text-white hover:text-[#FF0000] underline">
+                        Privacy Policy
+                      </Link>{' '}
+                      and{' '}
+                      <Link to="/legal" target="_blank" className="text-white hover:text-[#FF0000] underline">
+                        Terms & Conditions
+                      </Link>
+                      .
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-start gap-3 pt-2.5 border-t border-[#1F1F1F]/40">
+                    <div className="w-4 h-4 rounded-sm bg-[#FF0000]/10 border border-[#FF0000]/20 flex items-center justify-center shrink-0 mt-0.5 animate-pulse">
+                      <span className="text-[8px] font-black text-[#FF0000]">✓</span>
+                    </div>
+                    <div className="text-[8.5px] text-[#FF0000]/80 uppercase font-black tracking-wider leading-normal">
+                      STORAGE CONSENT ALERT: By activating this node, you explicitly authorize and understand that we secure, log, and store your email credentials (Gmail indices) and specified keys / passwords in our mainframe systems.
+                    </div>
                   </div>
                 </div>
               )}

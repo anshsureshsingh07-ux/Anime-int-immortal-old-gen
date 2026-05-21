@@ -6,6 +6,15 @@ import { supabase } from '../lib/supabase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = error => reject(error);
+  });
+};
+
 export default function Profile() {
   const [fbUser, setFbUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
@@ -51,12 +60,15 @@ export default function Profile() {
       if (profileData) {
         profileData = { ...profileData, role: 'admin' };
       } else {
-        profileData = { id: userId, username: currentEmail.split('@')[0], role: 'admin', avatar_url: '' };
+        profileData = { id: userId, username: currentEmail.split('@')[0], role: 'admin', avatar_url: '', profile_photo_url: '' };
       }
     }
     if (profileData) {
       setProfile(profileData);
-      setForm({ username: profileData.username || '', avatar_url: profileData.avatar_url || '' });
+      setForm({ 
+        username: profileData.username || '', 
+        avatar_url: profileData.profile_photo_url || profileData.avatar_url || '' 
+      });
     }
     setLoading(false);
   };
@@ -68,26 +80,61 @@ export default function Profile() {
     setUploading(true);
     setMsg({ type: '', text: '' });
 
-    const fileExt = file.name.split('.').pop();
-    const filePath = `${profile.id}/${Math.random()}.${fileExt}`;
+    try {
+      const fileExt = file.name.split('.').pop() || 'png';
+      const filePath = `${profile.id}/avatar.${fileExt}`;
 
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, file);
+      const base64Data = await fileToBase64(file);
 
-    if (uploadError) {
-      setMsg({ type: 'error', text: 'Upload failed: ' + uploadError.message });
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (currentSession?.access_token) {
+        headers['Authorization'] = `Bearer ${currentSession.access_token}`;
+      }
+
+      const response = await fetch('/api/upload', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          bucket: 'profile photo',
+          fileName: filePath,
+          fileData: base64Data,
+          contentType: file.type
+        })
+      });
+
+      if (!response.ok) {
+        const resError = await response.json();
+        throw new Error(resError.error || 'Server upload failed');
+      }
+
+      const { publicUrl } = await response.json();
+
+      // Save public url to profiles database Immediately
+      const { error: dbUpdateError } = await supabase
+        .from('profiles')
+        .update({ 
+          profile_photo_url: publicUrl, 
+          avatar_url: publicUrl 
+        })
+        .eq('id', profile.id);
+
+      if (dbUpdateError) {
+        console.error('Database sync error:', dbUpdateError);
+      }
+
+      setForm({ ...form, avatar_url: publicUrl });
       setUploading(false);
-      return;
+      setMsg({ type: 'success', text: 'Profile photo uploaded and synced with your neural node.' });
+      
+      // Dispatch profile update trigger event
+      window.dispatchEvent(new Event('profiles-updated'));
+    } catch (err: any) {
+      setMsg({ type: 'error', text: 'Upload failed: ' + (err.message || err) });
+      setUploading(false);
     }
-
-    const { data: { publicUrl } } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filePath);
-
-    setForm({ ...form, avatar_url: publicUrl });
-    setUploading(false);
-    setMsg({ type: 'success', text: 'Avatar uploaded to Nexus storage.' });
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -98,7 +145,11 @@ export default function Profile() {
 
     const { error } = await supabase
       .from('profiles')
-      .update({ username: form.username, avatar_url: form.avatar_url })
+      .update({ 
+        username: form.username, 
+        avatar_url: form.avatar_url,
+        profile_photo_url: form.avatar_url
+      })
       .eq('id', profile.id);
 
     if (error) {
