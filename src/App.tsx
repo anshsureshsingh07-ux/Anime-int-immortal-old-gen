@@ -256,7 +256,6 @@ import Profile from './pages/Profile';
 import NewsDetail from './pages/NewsDetail';
 import LegalPage from './pages/Legal';
 import SolarFlareOverlay from './components/SolarFlareOverlay';
-import OTPChallenge from './components/OTPChallenge';
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -266,7 +265,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const [dbUser, setDbUser] = useState<any>(null);
   const [currentUserFaction, setCurrentUserFaction] = useState<any>(null);
   const [isStarkSummer, setIsStarkSummer] = useState(() => localStorage.getItem('stark_summer_active') === 'true');
-  const [otpVerified, setOtpVerified] = useState(() => sessionStorage.getItem('otp_verified') === 'true');
   const [loadingAuth, setLoadingAuth] = useState(true);
   const location = useLocation();
 
@@ -544,8 +542,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     setDbUser(null);
     setCurrentUserFaction(null);
-    setOtpVerified(false);
-    sessionStorage.removeItem('otp_verified');
   };
 
   const user = firebaseUser ? {
@@ -698,19 +694,6 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (!firebaseUser && !isAuthRoute) {
     return <AuthPage />;
-  }
-
-  if (firebaseUser && !otpVerified && !isAuthRoute) {
-    return (
-      <OTPChallenge 
-        email={firebaseUser.email || 'agent@animeint.com'} 
-        onVerified={() => {
-          setOtpVerified(true);
-          sessionStorage.setItem('otp_verified', 'true');
-        }}
-        onCancel={handleSignOut}
-      />
-    );
   }
 
   if (isAuthRoute && firebaseUser && location.pathname !== '/auth/reset-password') {
