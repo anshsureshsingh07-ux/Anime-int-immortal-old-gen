@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import { 
   Shield, UserCheck, Trash2, Plus, 
   FileText, Users, BarChart, Settings,
-  AlertCircle, CheckCircle2, XCircle, Upload, Clock
+  AlertCircle, CheckCircle2, XCircle, Upload, Clock, CreditCard,
+  Search
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../lib/firebase';
+import { upgradeToPremium } from '../lib/profileSync';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -15,6 +17,16 @@ const fileToBase64 = (file: File): Promise<string> => {
     reader.onload = () => resolve(reader.result as string);
     reader.onerror = error => reject(error);
   });
+};
+
+const getFactionEmoji = (name?: string) => {
+  if (!name) return '🔰';
+  const n = name.trim().toLowerCase();
+  if (n.includes('akatsuki')) return '☁️';
+  if (n.includes('stark')) return '🛡️';
+  if (n.includes('britannian') || n.includes('empire') || n.includes('holy')) return '👑';
+  if (n.includes('lannister')) return '🦁';
+  return '🔰';
 };
 
 export default function Admin() {
@@ -28,6 +40,51 @@ export default function Admin() {
   const [polls, setPolls] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // User Directory search and filter states
+  const [allTransactions, setAllTransactions] = useState<any[]>([]);
+  const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [userTypeFilter, setUserTypeFilter] = useState<'all' | 'premium' | 'elite'>('all');
+  const [userFactions, setUserFactions] = useState<Record<string, any>>({});
+
+  const checkAndEnsureAdminProfile = async (user: any) => {
+    if (!user || !user.email) return;
+    
+    const adminEmails = ["anshsureshsingh07@gmail.com", "animeintofficial@gmail.com"];
+    if (adminEmails.includes(user.email.toLowerCase())) {
+      console.log("[Admin Auto-Repair] Checking profile status for admin user:", user.email);
+      const { data: profile, error: selectErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (selectErr) {
+        console.error("[Admin Auto-Repair] Error fetching profile during auto-repair check:", selectErr.message);
+      }
+
+      if (!profile || profile.role !== 'admin') {
+        console.log("[Admin Auto-Repair] Restructuring/establishing admin profile row for:", user.email);
+        const { data, error: upsertErr } = await supabase
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            username: profile?.username || user.user_metadata?.username || user.email.split('@')[0],
+            email: user.email,
+            role: 'admin'
+          }, { onConflict: 'id' })
+          .select();
+
+        if (upsertErr) {
+          console.error("[Admin Auto-Repair] Failed to automatically establish admin profile:", upsertErr.message);
+        } else {
+          console.log("[Admin Auto-Repair] Admin profile successfully active:", data);
+          fetchProfile(user.id);
+          fetchUsers();
+        }
+      }
+    }
+  };
+
   useEffect(() => {
     const unsubscribeFirebase = onAuthStateChanged(auth, (user) => {
       if (user) {
@@ -37,7 +94,10 @@ export default function Admin() {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session?.user) fetchProfile(session.user.id);
+      if (session?.user) {
+        fetchProfile(session.user.id);
+        checkAndEnsureAdminProfile(session.user);
+      }
     });
 
     fetchNews();
@@ -107,8 +167,24 @@ export default function Admin() {
   };
 
   const fetchUsers = async () => {
-    const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-    if (data) setUsers(data);
+    const { data: userData } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
+    if (userData) setUsers(userData);
+
+    const { data: txData } = await supabase.from('payment_transactions').select('*').order('created_at', { ascending: false });
+    if (txData) setAllTransactions(txData);
+
+    try {
+      const { data: factions } = await supabase.from('user_factions').select('*');
+      if (factions) {
+        const mapped: Record<string, any> = {};
+        factions.forEach(f => {
+          mapped[f.user_id] = f;
+        });
+        setUserFactions(mapped);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch factions for Admin space:', err);
+    }
   };
 
   const deleteNews = async (id: string) => {
@@ -159,12 +235,173 @@ export default function Admin() {
   const [releaseForm, setReleaseForm] = useState({ title: '', release_date: '', episode: 1, platform: 'Nexus' });
   const [pollForm, setPollForm] = useState({ question: '', options: '' });
 
+  // Informational Seeder states
+  const [scraperProviderId, setScraperProviderId] = useState('');
+  const [scraperAnimeTitle, setScraperAnimeTitle] = useState('');
+  const [scraperLoading, setScraperLoading] = useState(false);
+  const [scraperLogs, setScraperLogs] = useState<string[]>([]);
+  const [scraperSuccess, setScraperSuccess] = useState(false);
+  const [scraperError, setScraperError] = useState<string | null>(null);
+
+  const runAnimeScraper = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!scraperProviderId.trim()) return;
+
+    setScraperLoading(true);
+    setScraperError(null);
+    setScraperSuccess(false);
+    setScraperLogs([]);
+
+    try {
+      let token = null;
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (currentSession?.access_token) {
+        token = currentSession.access_token;
+      } else if (auth.currentUser) {
+        try {
+          token = await auth.currentUser.getIdToken();
+        } catch (tokenErr) {
+          console.warn("Failed retrieving Firebase ID Token:", tokenErr);
+        }
+      }
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const res = await fetch('/api/scrape-anime', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          providerId: scraperProviderId.trim(),
+          animeTitle: scraperAnimeTitle.trim() || undefined
+        })
+      });
+
+      if (!res.ok) {
+        let errText = 'Informational seeder failed';
+        try {
+          const contentType = res.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const errData = await res.json();
+            errText = errData.error || errText;
+          } else {
+            const rawText = await res.text();
+            if (rawText.length < 150) {
+              errText = rawText || `Server returned status: ${res.status}`;
+            } else {
+              errText = `Node reported an error (Status ${res.status})`;
+            }
+          }
+        } catch {
+          errText = `Transmission error with status code ${res.status}`;
+        }
+        throw new Error(errText);
+      }
+
+      const data = await res.json();
+      setScraperSuccess(true);
+      setScraperLogs(data.log || ['Import executed.']);
+      fetchAnime();
+    } catch (err: any) {
+      console.error(err);
+      setScraperError(err.message || 'Transmission connection lost');
+    } finally {
+      setScraperLoading(false);
+    }
+  };
+
   const addAnime = async (e: React.FormEvent) => {
     e.preventDefault();
-    const { error } = await supabase.from('anime').insert([animeForm]);
-    if (!error) {
-      setAnimeForm({ title: '', description: '', image: '', rating: 0, status: 'Completed', episodes: 1 });
-      fetchAnime();
+    if (!animeForm.title.trim()) return;
+
+    // Generate a valid slug from the Title parameter
+    const slug = animeForm.title.toLowerCase().trim()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || "anime-series";
+
+    try {
+      let token = null;
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (currentSession?.access_token) {
+        token = currentSession.access_token;
+      } else if (auth.currentUser) {
+        try {
+          token = await auth.currentUser.getIdToken();
+        } catch (tokenErr) {
+          console.warn("Failed retrieving Firebase ID Token:", tokenErr);
+        }
+      }
+
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      // Synchronize creation in "anime_series" using full-stack scrape-anime controller 
+      // which also generates 12 informational episode summaries correctly.
+      const res = await fetch('/api/scrape-anime', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          providerId: slug,
+          animeTitle: animeForm.title.trim(),
+          image_url: animeForm.image.trim()
+        })
+      });
+
+      let seriesId: string | null = null;
+      if (res.ok) {
+        const resData = await res.json();
+        seriesId = resData.seriesId || null;
+      } else {
+        console.warn("Full-stack anime_series creation returned non-200, attempting direct table fallback");
+        // Fallback: direct insert to anime_series
+        const { data: fallbackSeries, error: fallbackErr } = await supabase
+          .from('anime_series')
+          .insert([{
+            title: animeForm.title.trim(),
+            thumbnail_url: animeForm.image.trim()
+          }])
+          .select('id')
+          .maybeSingle();
+
+        if (fallbackErr) {
+          console.error("Direct fallback insert inside anime_series failed:", fallbackErr);
+        } else if (fallbackSeries) {
+          seriesId = fallbackSeries.id;
+        }
+      }
+
+      // Save into 'anime' table with the mapped series_id
+      const payload: any = {
+        title: animeForm.title,
+        description: animeForm.description || "Custom manual entry decrypted inside localized archive records.",
+        image: animeForm.image,
+        rating: animeForm.rating,
+        status: animeForm.status,
+        episodes: animeForm.episodes
+      };
+
+      if (seriesId) {
+        payload.series_id = seriesId;
+      }
+
+      const { error: insertErr } = await supabase.from('anime').insert([payload]);
+
+      if (!insertErr) {
+        setAnimeForm({ title: '', description: '', image: '', rating: 0, status: 'Completed', episodes: 1 });
+        fetchAnime();
+      } else {
+        console.error("Error inserting custom anime record:", insertErr);
+      }
+    } catch (err) {
+      console.error("Manual Entry Ingestion Exception:", err);
     }
   };
 
@@ -227,6 +464,197 @@ export default function Admin() {
     additionalImages: '',
   });
 
+  // App Payment Config States
+  const [paymentUpiId, setPaymentUpiId] = useState('6351197285@fam');
+  const [paymentQrUrl, setPaymentQrUrl] = useState('');
+  const [paymentQrFile, setPaymentQrFile] = useState<File | null>(null);
+  const [paymentConfigLoading, setPaymentConfigLoading] = useState(false);
+  const [paymentConfigSuccess, setPaymentConfigSuccess] = useState(false);
+  const [paymentConfigError, setPaymentConfigError] = useState<string | null>(null);
+
+  // Premium Verification states & handlers
+  const [pendingTx, setPendingTx] = useState<any[]>([]);
+  const [pendingTxLoading, setPendingTxLoading] = useState(false);
+  const [pendingTxError, setPendingTxError] = useState<string | null>(null);
+  const [pendingTxSuccessMsg, setPendingTxSuccessMsg] = useState<string | null>(null);
+  const [selectedScreenshotUrl, setSelectedScreenshotUrl] = useState<string | null>(null);
+
+  const fetchPendingTx = async () => {
+    setPendingTxLoading(true);
+    setPendingTxError(null);
+    try {
+      const { data, error } = await supabase
+        .from('payment_transactions')
+        .select('*')
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      setPendingTx(data || []);
+    } catch (err: any) {
+      console.error('Failed to fetch pending transactions:', err);
+      setPendingTxError(err.message || 'Error fetching pending transactions.');
+    } finally {
+      setPendingTxLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'payments') {
+      fetchPendingTx();
+    }
+  }, [activeTab]);
+
+  const handleApproveTx = async (id: string, userId: string, tier: string) => {
+    try {
+      setPendingTxSuccessMsg(null);
+      setPendingTxError(null);
+      const { error } = await supabase
+        .from('payment_transactions')
+        .update({ status: 'verified' })
+        .eq('id', id);
+      if (error) throw error;
+
+      // Safe local profiles sync update
+      try {
+        const validatedTier = (tier === 'plus' || tier === 'god' || tier === 'monarch') ? tier : 'monarch';
+        await upgradeToPremium(userId, validatedTier);
+      } catch (profileErr) {
+        console.warn('Profiles update sync notice:', profileErr);
+      }
+
+      setPendingTxSuccessMsg('Transaction successfully verified!');
+      await fetchPendingTx();
+    } catch (err: any) {
+      console.error('Approval failed:', err);
+      setPendingTxError(err.message || 'Approval transmission failed.');
+    }
+  };
+
+  const handleRejectTx = async (id: string) => {
+    try {
+      setPendingTxSuccessMsg(null);
+      setPendingTxError(null);
+      const { error } = await supabase
+        .from('payment_transactions')
+        .update({ status: 'rejected' })
+        .eq('id', id);
+      if (error) throw error;
+
+      setPendingTxSuccessMsg('Transaction successfully rejected.');
+      await fetchPendingTx();
+    } catch (err: any) {
+      console.error('Rejection failed:', err);
+      setPendingTxError(err.message || 'Rejection transmission failed.');
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'settings') {
+      const fetchPaymentConfigSettings = async () => {
+        try {
+          const { data, error } = await supabase
+            .from('app_settings')
+            .select('*')
+            .eq('id', 'global_config')
+            .maybeSingle();
+          if (data) {
+            setPaymentUpiId(data.upi_id || '6351197285@fam');
+            setPaymentQrUrl(data.qr_url || '');
+          }
+        } catch (err: any) {
+          console.error('Failed to load payment config table settings:', err);
+        }
+      };
+      fetchPaymentConfigSettings();
+    }
+  }, [activeTab]);
+
+  const handlePaymentConfigSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!paymentUpiId) {
+      setPaymentConfigError('Please provide a valid UPI ID');
+      return;
+    }
+
+    setPaymentConfigLoading(true);
+    setPaymentConfigError(null);
+    setPaymentConfigSuccess(false);
+
+    try {
+      let finalQrUrl = paymentQrUrl;
+
+      if (paymentQrFile) {
+        let token = null;
+        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        if (currentSession?.access_token) {
+          token = currentSession.access_token;
+        } else if (auth.currentUser) {
+          try {
+            token = await auth.currentUser.getIdToken();
+          } catch (tokenErr) {
+            console.warn("Failed retrieving Firebase ID Token in payment configuration upload:", tokenErr);
+          }
+        }
+
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json'
+        };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+
+        const fileExt = paymentQrFile.name.split('.').pop() || 'png';
+        const fileName = `qr_payment_${Date.now()}.${fileExt}`;
+        const base64Data = await fileToBase64(paymentQrFile);
+
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            bucket: 'news',
+            fileName,
+            fileData: base64Data,
+            contentType: paymentQrFile.type
+          })
+        });
+
+        if (!response.ok) {
+          const resError = await response.json();
+          throw new Error(resError.error || 'Server upload failed');
+        }
+
+        const resData = await response.json();
+        if (resData.publicUrl) {
+          finalQrUrl = resData.publicUrl;
+        } else {
+          throw new Error('Upload response missing publicUrl');
+        }
+      }
+
+      // Upsert global_config inside app_settings table
+      const { error } = await supabase
+        .from('app_settings')
+        .upsert({
+          id: 'global_config',
+          upi_id: paymentUpiId,
+          qr_url: finalQrUrl
+        }, { onConflict: 'id' });
+
+      if (error) {
+        throw error;
+      }
+
+      setPaymentQrUrl(finalQrUrl);
+      setPaymentQrFile(null);
+      setPaymentConfigSuccess(true);
+    } catch (err: any) {
+      console.error('Failed to submit App Payment Configuration:', err);
+      setPaymentConfigError(err.message || 'Error occurred while saving app settings');
+    } finally {
+      setPaymentConfigLoading(false);
+    }
+  };
+
   const isAdmin = (currentDbUser && (currentDbUser.role === 'admin' || currentDbUser.role === 'news_writer' || currentDbUser.role === 'moderator')) || 
                   (session?.user?.email === 'anshsureshsingh07@gmail.com' || session?.user?.email === 'animeintofficial@gmail.com');
 
@@ -242,8 +670,18 @@ export default function Admin() {
     setFormSuccess(false);
 
     try {
+      let token = null;
       const { data: { session: currentSession } } = await supabase.auth.getSession();
-      const token = currentSession?.access_token;
+      if (currentSession?.access_token) {
+        token = currentSession.access_token;
+      } else if (auth.currentUser) {
+        try {
+          token = await auth.currentUser.getIdToken();
+        } catch (tokenErr) {
+          console.warn("Failed retrieving Firebase ID Token in news creation:", tokenErr);
+        }
+      }
+
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
       };
@@ -396,7 +834,8 @@ export default function Admin() {
           { id: 'releases', name: 'Release Tracker', icon: Clock },
           { id: 'polls', name: 'Community Polls', icon: BarChart },
           { id: 'apps', name: 'Applications', icon: UserCheck },
-          { id: 'users', name: 'User Sector', icon: Users },
+          { id: 'users', name: 'User Directory', icon: Users },
+          { id: 'payments', name: 'Premium Ledger', icon: CreditCard },
           { id: 'settings', name: 'System Config', icon: Settings },
         ].map(item => (
           <button 
@@ -577,11 +1016,72 @@ export default function Admin() {
 
          {activeTab === 'anime' && (
             <div className="space-y-12">
-               <section className="cyber-card p-8 bg-black/40 border-dashed border-white/20">
-                  <h3 className="text-xl font-black italic tracking-tighter uppercase mb-8 flex items-center gap-2">
-                     <Plus className="text-red-600" /> New <span className="text-red-500">Database Entry</span>
+               <section className="cyber-card p-8 bg-black/40 border border-red-600/20 border-dashed">
+                  <h3 className="text-xl font-black italic tracking-tighter uppercase mb-2 flex items-center gap-2 text-red-500">
+                     ✨ AUTOMATED COMPLIANCE-SAFE SEEDER NODE
                   </h3>
-                  <form onSubmit={addAnime} className="space-y-6">
+                  <p className="text-xs text-gray-400 mb-6 font-mono uppercase tracking-wider leading-relaxed">
+                     Input an anime slug identifier below. Our high-reliability informational engine will seed exactly 12 safe, text-only episodic summaries & titles into the database archives. Completely compliant with Play Store and App Store policies.
+                  </p>
+                  
+                  <form onSubmit={runAnimeScraper} className="space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-gray-500">Anime slug / ID</label>
+                        <input 
+                          required 
+                          value={scraperProviderId} 
+                          onChange={e => setScraperProviderId(e.target.value)} 
+                          placeholder="e.g. solo-leveling, attack-on-titan, demon-slayer" 
+                          className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg p-3 text-sm font-mono focus:border-red-600 outline-none placeholder-gray-800 text-white animate-pulse" 
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase text-gray-500">Custom Title Override (Optional)</label>
+                        <input 
+                          value={scraperAnimeTitle} 
+                          onChange={e => setScraperAnimeTitle(e.target.value)} 
+                          placeholder="e.g. Solo Leveling (Overrides default slug-based title)" 
+                          className="w-full bg-[#0a0a0a] border border-white/10 rounded-lg p-3 text-sm font-mono focus:border-red-600 outline-none placeholder-gray-800 text-white" 
+                        />
+                      </div>
+                    </div>
+
+                    <button 
+                      type="submit" 
+                      disabled={scraperLoading || !scraperProviderId.trim()}
+                      className="bg-red-600 text-white px-8 py-3 rounded-full font-black uppercase text-[10px] tracking-widest hover:bg-red-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    >
+                      {scraperLoading ? 'STABILIZING MAIN DATABASE CHANNELS...' : 'INITIATE INFORMATIONAL DATA SEED'}
+                    </button>
+                  </form>
+
+                  {scraperSuccess && (
+                    <div className="mt-6 p-4 bg-green-950/20 border border-green-500/20 rounded font-mono text-xs text-green-400">
+                      <p className="font-bold uppercase tracking-wider mb-2">✓ Compliance Check Passed. Meta-data Ingest Complete.</p>
+                      <div className="max-h-40 overflow-y-auto space-y-1 mt-2 text-gray-400 border-t border-green-500/20 pt-2 text-[10px]">
+                        {scraperLogs.map((log, i) => (
+                          <div key={i} className="border-l border-green-500/30 pl-2 font-mono">{log}</div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {scraperError && (
+                    <div className="mt-6 p-4 bg-red-950/20 border border-red-500/20 rounded font-mono text-xs text-red-500 uppercase tracking-wide">
+                      ⚡ SEED SIGNAL FAILED: {scraperError}
+                    </div>
+                  )}
+                </section>
+
+                <section className="cyber-card p-8 bg-black/40 border-dashed border-white/20">
+                   <h3 className="text-xl font-black italic tracking-tighter uppercase mb-2 flex items-center gap-2">
+                      <Plus className="text-red-600" /> New <span className="text-red-500">Manual Entry</span>
+                   </h3>
+                   <p className="text-xs text-gray-500 mb-6 font-mono uppercase tracking-wider">
+                     Manually populate the core Series schema parameters below.
+                   </p>
+                   <form onSubmit={addAnime} className="space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <label className="text-[10px] font-black uppercase text-gray-500">Title</label>
@@ -788,64 +1288,509 @@ export default function Admin() {
          )}
 
          {activeTab === 'users' && (
-           <div className="space-y-8">
-              <h3 className="text-sm font-black uppercase tracking-widest text-gray-500 mb-6">Node Directory (User Access)</h3>
-              <div className="cyber-card p-6 bg-black/40 border-white/5 overflow-x-auto">
-                 <table className="w-full text-left font-mono text-[10px] uppercase">
-                    <thead>
-                       <tr className="border-b border-white/10 text-gray-600">
-                          <th className="py-2">User Node</th>
-                          <th className="py-2">Rank/Role</th>
-                          <th className="py-2">Clearance</th>
-                          <th className="py-2">Action</th>
-                       </tr>
-                    </thead>
-                    <tbody className="divide-y divide-white/5">
-                       {users.map(u => (
-                          <tr key={u.id} className="text-gray-300">
-                             <td className="py-4">
-                                <div className="flex items-center gap-3">
-                                   <div className="w-8 h-8 bg-red-600/20 rounded border border-red-600/30 flex items-center justify-center text-red-500">
-                                      {u.role?.[0]?.toUpperCase() || 'M'}
-                                   </div>
-                                   <div>
-                                      <div className="font-bold text-white tracking-tighter italic">{u.username || 'ANON_NODE'}</div>
-                                      <div className="text-[8px] text-gray-600">{u.email || u.id.substring(0, 16)}...</div>
-                                   </div>
-                                </div>
-                             </td>
-                             <td className="py-4">
-                                <span className={u.role === 'admin' ? 'text-red-500' : 'text-gray-500'}>
-                                   {u.role || 'member'}
-                                </span>
-                             </td>
-                             <td className="py-4">
-                                <div className="flex gap-1">
-                                   {[1, 2, 3, 4, 5].map(i => (
-                                      <div key={i} className={`w-2 h-1 rounded-full ${i <= (u.role === 'admin' ? 5 : u.role === 'moderator' ? 4 : 1) ? 'bg-red-600' : 'bg-gray-800'}`} />
-                                   ))}
-                                </div>
-                             </td>
-                             <td className="py-4">
-                                <select 
-                                   className="bg-black border border-white/10 p-1 rounded text-[8px] text-white"
-                                   value={u.role || 'member'}
-                                   onChange={(e) => updateUserRole(u.id, e.target.value)}
-                                >
-                                   <option value="member">MEMBER</option>
-                                   <option value="news_writer">WRITER</option>
-                                   <option value="moderator">MODERATOR</option>
-                                   <option value="admin">ADMIN</option>
-                                </select>
-                             </td>
-                          </tr>
-                       ))}
-                    </tbody>
-                 </table>
-              </div>
-           </div>
-         )}
+            <div className="space-y-8 animate-fade-in font-sans">
+               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div>
+                     <h3 className="text-xl font-black uppercase tracking-widest text-white font-mono">
+                        User Management Directory
+                     </h3>
+                     <p className="text-xs text-gray-400 font-mono uppercase mt-1">
+                        Consolidated directory database matching user clearance records with real-time premium ledger assets.
+                     </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                     <span className="text-[10px] uppercase font-mono px-3 py-1 bg-white/5 border border-white/10 rounded-full text-gray-400">
+                        Total Nodes: <span className="text-white font-black">{users.length}</span>
+                     </span>
+                     <span className="text-[10px] uppercase font-mono px-3 py-1 bg-red-600/10 border border-red-600/30 rounded-full text-red-500">
+                        Filtered: <span className="text-white font-black">{users.filter(u => {
+                            const username = (u.username || '').toLowerCase();
+                            const email = (u.email || '').toLowerCase();
+                            const matchesSearch = username.includes(userSearchTerm.toLowerCase()) || email.includes(userSearchTerm.toLowerCase());
+                            if (!matchesSearch) return false;
+                            if (userTypeFilter === 'all') return true;
+                            if (userTypeFilter === 'premium') return !!u.is_premium || u.premium_tier === 'plus' || u.premium_tier === 'god' || u.premium_tier === 'monarch';
+                            if (userTypeFilter === 'elite') return u.role === 'admin' || u.role === 'moderator';
+                            return true;
+                        }).length}</span>
+                     </span>
+                  </div>
+               </div>
+
+               {/* Search & Filtering Control Center */}
+               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-center bg-zinc-950/80 p-4 rounded-xl border border-white/5 font-mono">
+                  {/* Text Search input */}
+                  <div className="relative lg:col-span-1">
+                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                     <input 
+                        type="text"
+                        placeholder="SEARCH BY USERNAME OR EMAIL..."
+                        value={userSearchTerm}
+                        onChange={(e) => setUserSearchTerm(e.target.value)}
+                        className="w-full bg-black/60 border border-white/10 hover:border-white/20 focus:border-red-600 rounded-lg py-2 pl-9 pr-4 text-xs font-mono uppercase tracking-wide text-white transition-all outline-none"
+                     />
+                  </div>
+
+                  {/* Filter Tabs / Quick Toggle buttons */}
+                  <div className="lg:col-span-2 flex flex-wrap gap-2 justify-start lg:justify-end">
+                     <button
+                        onClick={() => setUserTypeFilter('all')}
+                        className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border ${
+                           userTypeFilter === 'all' 
+                           ? 'bg-white/15 text-white border-white/20 shadow-[0_0_10px_rgba(255,255,255,0.05)]' 
+                           : 'bg-black/40 text-gray-500 border-white/5 hover:text-white hover:border-white/10'
+                        }`}
+                     >
+                        ALL OPERATORS
+                     </button>
+                     <button
+                        onClick={() => setUserTypeFilter('premium')}
+                        className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border flex items-center gap-1.5 ${
+                           userTypeFilter === 'premium' 
+                           ? 'bg-yellow-500/20 text-yellow-500 border-yellow-500/40 shadow-[0_0_15px_rgba(234,179,8,0.15)]' 
+                           : 'bg-black/40 text-gray-500 border-white/5 hover:text-yellow-500/50 hover:border-yellow-500/20'
+                        }`}
+                     >
+                        <span>★</span> PREMIUM NODES
+                     </button>
+                     <button
+                        onClick={() => setUserTypeFilter('elite')}
+                        className={`px-4 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all border flex items-center gap-1.5 ${
+                           userTypeFilter === 'elite' 
+                           ? 'bg-red-600/20 text-red-500 border-red-600/40 shadow-[0_0_15px_rgba(220,38,38,0.15)]' 
+                           : 'bg-black/40 text-gray-500 border-white/5 hover:text-red-500/50 hover:border-red-600/20'
+                        }`}
+                     >
+                        <span>⚡</span> ELITE ADMINS
+                     </button>
+                  </div>
+               </div>
+
+               {/* Table Display */}
+               <div className="cyber-card bg-black/60 border border-white/5 overflow-hidden">
+                  <div className="overflow-x-auto">
+                     <table className="w-full text-left font-mono text-[10px] uppercase">
+                        <thead>
+                           <tr className="border-b border-white/10 bg-zinc-950/40 text-gray-500">
+                              <th className="py-3 px-4 font-black tracking-wider">User Profile & Metadata</th>
+                              <th className="py-3 px-4 font-black tracking-wider">Email Address</th>
+                              <th className="py-3 px-4 font-black tracking-wider text-center">Active clearance Tier</th>
+                              <th className="py-3 px-4 font-black tracking-wider text-center">Admin Node Role</th>
+                              <th className="py-3 px-4 font-black tracking-wider">Last Transaction Link</th>
+                              <th className="py-3 px-4 font-black tracking-wider text-right">Registered On</th>
+                           </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5">
+                           {users.filter(u => {
+                              const username = (u.username || '').toLowerCase();
+                              const email = (u.email || '').toLowerCase();
+                              const matchesSearch = username.includes(userSearchTerm.toLowerCase()) || email.includes(userSearchTerm.toLowerCase());
+                              if (!matchesSearch) return false;
+                              if (userTypeFilter === 'all') return true;
+                              if (userTypeFilter === 'premium') return !!u.is_premium || u.premium_tier === 'plus' || u.premium_tier === 'god' || u.premium_tier === 'monarch';
+                              if (userTypeFilter === 'elite') return u.role === 'admin' || u.role === 'moderator';
+                              return true;
+                           }).length === 0 ? (
+                              <tr>
+                                 <td colSpan={6} className="py-12 text-center text-gray-600 font-mono text-xs italic">
+                                    No database entries matching selected filters found
+                                 </td>
+                              </tr>
+                           ) : (
+                              users.filter(u => {
+                                 const username = (u.username || '').toLowerCase();
+                                 const email = (u.email || '').toLowerCase();
+                                 const matchesSearch = username.includes(userSearchTerm.toLowerCase()) || email.includes(userSearchTerm.toLowerCase());
+                                 if (!matchesSearch) return false;
+                                 if (userTypeFilter === 'all') return true;
+                                 if (userTypeFilter === 'premium') return !!u.is_premium || u.premium_tier === 'plus' || u.premium_tier === 'god' || u.premium_tier === 'monarch';
+                                 if (userTypeFilter === 'elite') return u.role === 'admin' || u.role === 'moderator';
+                                 return true;
+                              }).map(u => {
+                                 // Look up latest transaction
+                                 const lastTx = allTransactions.find(tx => tx.user_id === u.id);
+                                 
+                                 // Determine styling for Active Tier
+                                 let tierStyle = "bg-white/5 text-gray-400 border-white/5";
+                                 let tierLabel = "FREE";
+                                 const isPremium = !!u.is_premium || u.premium_tier === 'plus' || u.premium_tier === 'god' || u.premium_tier === 'monarch';
+                                 
+                                 if (u.role === 'admin') {
+                                    tierStyle = "bg-red-600/10 text-red-500 border-red-600/30 font-black animate-pulse shadow-[0_0_10px_rgba(220,38,38,0.1)]";
+                                    tierLabel = "ELITE ADMIN";
+                                 } else if (isPremium) {
+                                    const pTier = u.premium_tier?.toUpperCase() || 'PREMIUM';
+                                    tierStyle = "bg-gradient-to-r from-yellow-500/10 to-amber-500/10 text-yellow-500 border-yellow-500/30 font-black shadow-[0_0_12px_rgba(245,158,11,0.08)]";
+                                    tierLabel = `PREMIUM (${pTier})`;
+                                 } else if (u.role === 'moderator') {
+                                    tierStyle = "bg-purple-600/10 text-purple-400 border-purple-600/30";
+                                    tierLabel = "MODERATOR";
+                                 }
+                                 
+                                 return (
+                                    <tr key={u.id} className="text-gray-300 hover:bg-white/[0.02] transition-colors">
+                                       <td className="py-4 px-4 max-w-sm">
+                                          <div className="flex items-start gap-3">
+                                             <div className="relative group shrink-0">
+                                                <img 
+                                                   src={u.avatar_url || u.profile_photo_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${u.id}`} 
+                                                   className="w-10 h-10 rounded border border-white/10 bg-black/40 object-cover" 
+                                                   referrerPolicy="no-referrer"
+                                                   alt="Avatar"
+                                                />
+                                                <div className="opacity-0 group-hover:opacity-100 absolute inset-0 bg-black/60 rounded flex items-center justify-center transition-all">
+                                                   <span className="text-[6px] text-white font-mono">ID PREV</span>
+                                                </div>
+                                             </div>
+                                             
+                                             <div className="space-y-1">
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                   <span className="font-black text-white tracking-tighter italic text-xs block truncate max-w-[300px]">
+                                                      {u.username || 'ANON_NODE'} [{tierLabel}]
+                                                   </span>
+                                                   {userFactions[u.id] && (
+                                                      <span className="text-[10px] text-gray-400 font-bold font-mono flex items-center gap-1">
+                                                         • {getFactionEmoji(userFactions[u.id].faction_name)} {userFactions[u.id].faction_name.toUpperCase()} {userFactions[u.id].faction_rank.toUpperCase()}
+                                                      </span>
+                                                   )}
+                                                   <span className="px-1.5 py-0.2 bg-white/5 border border-white/5 text-[7px] text-gray-500 font-mono rounded">
+                                                      LVL {u.level || 1}
+                                                   </span>
+                                                </div>
+                                                <div className="text-[8px] text-gray-500 font-mono select-all block font-bold cursor-help" title={u.id}>
+                                                   ID: {u.id.substring(0, 8)}...{u.id.substring(u.id.length - 8)}
+                                                </div>
+                                                {/* Bio preview */}
+                                                <div className="text-[9px] text-gray-400 lowercase max-w-[200px] truncate italic font-sans mt-0.5" title={u.bio || 'No status written'}>
+                                                   "{u.bio || 'no intelligence bio record.'}"
+                                                </div>
+                                             </div>
+                                          </div>
+                                       </td>
+                                       
+                                       <td className="py-4 px-4 font-mono text-gray-400 lowercase text-[9px] select-all">
+                                          {u.email || (
+                                             <span className="text-gray-600 uppercase tracking-widest italic text-[8px]">
+                                                NO_EMAIL_RECORDED
+                                             </span>
+                                          )}
+                                       </td>
+                                       
+                                       <td className="py-4 px-4 text-center">
+                                          <span className={`inline-block px-2.5 py-1 text-[8px] font-mono rounded-full border uppercase tracking-wider ${tierStyle}`}>
+                                             {tierLabel}
+                                          </span>
+                                       </td>
+
+                                       <td className="py-4 px-4 text-center">
+                                          <select 
+                                             className="bg-black border border-white/10 hover:border-white/20 p-1 px-2 rounded-lg text-[8px] text-white font-mono uppercase tracking-wide focus:border-red-600 outline-none w-28 text-center cursor-pointer transition-all"
+                                             value={u.role || 'member'}
+                                             onChange={(e) => updateUserRole(u.id, e.target.value)}
+                                          >
+                                             <option value="member">MEMBER</option>
+                                             <option value="news_writer">WRITER</option>
+                                             <option value="moderator">MODERATOR</option>
+                                             <option value="admin">ADMIN</option>
+                                          </select>
+                                       </td>
+
+                                       <td className="py-4 px-4">
+                                          {lastTx ? (
+                                             <div className="space-y-1 font-mono text-[9px]">
+                                                <div className="flex items-center gap-1.5">
+                                                   <span className="text-gray-400 uppercase tracking-wide">UTR:</span>
+                                                   <span className="font-bold text-white select-all">{lastTx.transaction_id}</span>
+                                                </div>
+                                                <div className="flex items-center gap-1.5">
+                                                   <span className="text-gray-500">STATUS:</span>
+                                                   <span className={`px-1.5 py-0.5 rounded text-[8px] font-black uppercase ${
+                                                      lastTx.status === 'verified' ? 'bg-green-500/10 text-green-500 border border-green-500/20' :
+                                                      lastTx.status === 'rejected' ? 'bg-red-500/10 text-red-500 border border-red-500/20' :
+                                                      'bg-yellow-500/10 text-yellow-500 border border-yellow-500/20'
+                                                   }`}>
+                                                      {lastTx.status}
+                                                   </span>
+                                                   {lastTx.screenshot_url && (
+                                                      <button 
+                                                         onClick={() => setSelectedScreenshotUrl(lastTx.screenshot_url)}
+                                                         className="text-yellow-500 hover:text-white transition-colors underline text-[7px] font-black uppercase ml-auto"
+                                                      >
+                                                         VIEW RECEIPT
+                                                      </button>
+                                                   )}
+                                                </div>
+                                             </div>
+                                          ) : (
+                                             <span className="text-gray-600 font-mono text-[9px] uppercase tracking-widest italic block">
+                                                NO_LEDGER_DATA
+                                             </span>
+                                          )}
+                                       </td>
+
+                                       <td className="py-4 px-4 text-right font-mono text-gray-500 text-[9px]">
+                                          {new Date(u.created_at).toLocaleDateString(undefined, { 
+                                             year: 'numeric', 
+                                             month: 'short', 
+                                             day: 'numeric' 
+                                          })}
+                                       </td>
+                                    </tr>
+                                 );
+                              })
+                           )}
+                        </tbody>
+                     </table>
+                  </div>
+               </div>
+            </div>
+          )}
+
+          {activeTab === 'payments' && (
+             <div className="space-y-8 animate-fade-in font-sans">
+                <div className="flex items-center justify-between">
+                   <div>
+                      <h3 className="text-sm font-black uppercase tracking-widest text-gray-400 font-mono mb-1">Premium Ledger Node</h3>
+                      <p className="text-[10px] text-gray-500 font-mono uppercase tracking-widest">Verify subscriber payments and authenticate membership clearances</p>
+                   </div>
+                   <button 
+                     onClick={fetchPendingTx}
+                     disabled={pendingTxLoading}
+                     className="px-3 py-1 bg-white/5 border border-white/10 text-[9px] font-mono rounded hover:bg-white/10 uppercase tracking-widest transition-all"
+                   >
+                     {pendingTxLoading ? 'RELOADING...' : 'FORCE REFRESH'}
+                   </button>
+                </div>
+
+                {pendingTxError && (
+                  <div className="p-4 bg-red-950/40 border border-red-900/40 rounded-xl flex items-center gap-3 text-red-400 text-xs font-mono uppercase tracking-wider">
+                    <AlertCircle size={16} className="shrink-0 animate-bounce" />
+                    <span>{pendingTxError}</span>
+                  </div>
+                )}
+
+                {pendingTxSuccessMsg && (
+                  <div className="p-4 bg-green-950/40 border border-green-900/40 rounded-xl flex items-center gap-3 text-green-400 text-xs font-mono uppercase tracking-wider">
+                     <CheckCircle2 size={16} className="shrink-0" />
+                     <span>{pendingTxSuccessMsg}</span>
+                  </div>
+                )}
+
+                <div className="cyber-card p-6 bg-black/40 border border-white/5 overflow-x-auto">
+                   {pendingTxLoading ? (
+                     <div className="p-12 text-center text-xs font-mono text-gray-500 uppercase tracking-widest animate-pulse">
+                       Querying secure transaction registers...
+                     </div>
+                   ) : pendingTx.length === 0 ? (
+                     <div className="p-12 text-center text-xs font-mono text-gray-500 uppercase tracking-widest">
+                       No pending subscription receipts await authorization.
+                     </div>
+                   ) : (
+                     <table className="w-full text-left border-collapse font-sans">
+                        <thead>
+                           <tr className="border-b border-white/10 text-[9px] font-mono text-gray-400 uppercase tracking-widest">
+                              <th className="py-3 px-4 font-black">User Details</th>
+                              <th className="py-3 px-4 font-black">UTR / Transaction ID</th>
+                              <th className="py-3 px-4 font-black">Receipt Proof</th>
+                              <th className="py-3 px-4 font-black">Designated Tier</th>
+                              <th className="py-3 px-4 font-black">Timestamp</th>
+                              <th className="py-3 px-4 font-black text-right">Actions</th>
+                           </tr>
+                        </thead>
+                        <tbody className="divide-y divide-white/5 text-xs text-white">
+                           {pendingTx.map((tx) => (
+                              <tr key={tx.id} className="hover:bg-white/[0.01] transition-all">
+                                 <td className="py-4 px-4">
+                                    <div className="font-bold">{tx.username || 'Vanguard Agent'}</div>
+                                    <div className="text-[10px] text-gray-500 font-mono uppercase tracking-wider mt-0.5">{tx.user_email || tx.user_id}</div>
+                                    <div className="text-[8px] text-gray-600 font-mono mt-0.5 uppercase tracking-wider">ID: {tx.user_id}</div>
+                                 </td>
+                                 <td className="py-4 px-4 font-mono text-yellow-500 font-black tracking-wider uppercase">
+                                    {tx.transaction_id || tx.utr}
+                                 </td>
+                                 <td className="py-4 px-4">
+                                    {tx.screenshot_url ? (
+                                       <div 
+                                         onClick={() => setSelectedScreenshotUrl(tx.screenshot_url)}
+                                         className="w-16 h-12 rounded border border-white/10 bg-black/50 overflow-hidden cursor-pointer hover:border-yellow-500/50 hover:scale-105 transition-all flex items-center justify-center relative group"
+                                       >
+                                         <img 
+                                           src={tx.screenshot_url} 
+                                           alt="Receipt Proof" 
+                                           className="w-full h-full object-cover" 
+                                           referrerPolicy="no-referrer"
+                                         />
+                                         <div className="absolute inset-x-0 bottom-0 bg-black/85 py-0.5 text-center text-[7px] font-mono font-black uppercase text-yellow-500 tracking-wider">
+                                           PREVIEW
+                                         </div>
+                                       </div>
+                                    ) : (
+                                       <span className="text-gray-600 font-mono text-[9px] uppercase tracking-widest">No receipt image</span>
+                                    )}
+                                 </td>
+                                 <td className="py-4 px-4">
+                                    <span className="px-2 py-0.5 bg-yellow-500/10 text-yellow-500 text-[9px] font-mono rounded border border-yellow-500/20 uppercase tracking-wider font-extrabold">
+                                       {tx.tier?.toUpperCase() || 'MONARCH'}
+                                    </span>
+                                 </td>
+                                 <td className="py-4 px-4 font-mono text-gray-500 text-[10px] uppercase">
+                                    {new Date(tx.created_at).toLocaleString('en-US', { timeZoneName: 'short' })}
+                                 </td>
+                                 <td className="py-4 px-4 text-right">
+                                    <div className="flex items-center justify-end gap-2">
+                                       <button 
+                                         onClick={() => handleApproveTx(tx.id, tx.user_id, tx.tier || 'monarch')}
+                                         className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white font-mono text-[9px] font-black uppercase tracking-wider rounded transition-all"
+                                       >
+                                         APPROVE PAYMENT
+                                       </button>
+                                       <button 
+                                         onClick={() => handleRejectTx(tx.id)}
+                                         className="px-3 py-1.5 bg-red-600/20 border border-red-500/20 hover:bg-red-600 text-white font-mono text-[9px] font-black uppercase tracking-wider rounded transition-all"
+                                       >
+                                         REJECT
+                                       </button>
+                                    </div>
+                                 </td>
+                              </tr>
+                           ))}
+                        </tbody>
+                     </table>
+                   )}
+                </div>
+             </div>
+          )}
+          {activeTab === 'settings' && (
+             <div className="space-y-8 animate-fade-in font-sans">
+                <h3 className="text-sm font-black uppercase tracking-widest text-gray-400 mb-6 font-mono">System Configuration</h3>
+                
+                <section className="cyber-card p-8 bg-black/40 border border-white/5 border-dashed">
+                   <div className="flex items-center gap-3 mb-6">
+                     <div className="w-8 h-8 rounded-lg bg-red-600/20 border border-red-600/30 flex items-center justify-center text-red-500">
+                       <Settings size={16} />
+                     </div>
+                     <div>
+                       <h4 className="text-sm font-bold text-white uppercase tracking-wider italic">App Payment Configuration</h4>
+                       <p className="text-[10px] text-gray-500 font-mono uppercase tracking-widest mt-0.5">Define UPI ID address and synchronize visual scan gateway QR</p>
+                     </div>
+                   </div>
+
+                   <form onSubmit={handlePaymentConfigSubmit} className="space-y-6">
+                      {paymentConfigError && (
+                        <div className="p-4 bg-red-950/40 border border-red-900/40 rounded-xl flex items-center gap-3 text-red-400 text-xs font-mono uppercase tracking-wider">
+                          <AlertCircle size={16} className="shrink-0 animate-bounce" />
+                          <span>{paymentConfigError}</span>
+                        </div>
+                      )}
+
+                      {paymentConfigSuccess && (
+                        <div className="p-4 bg-green-950/40 border border-green-900/40 rounded-xl flex items-center gap-3 text-green-400 text-xs font-mono uppercase tracking-wider">
+                          <CheckCircle2 size={16} className="shrink-0" />
+                          <span>System configuration synced correctly across nodes!</span>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                         {/* UPI ID Input */}
+                         <div className="space-y-2">
+                            <label className="text-[8px] font-mono font-black text-gray-400 uppercase tracking-widest block">Official Merchant UPI ID</label>
+                            <input 
+                              type="text" 
+                              className="w-full bg-black border border-white/10 rounded-lg p-3 text-xs text-white uppercase focus:border-red-600 focus:outline-none transition-all font-mono"
+                              placeholder="6351197285@fam"
+                              value={paymentUpiId}
+                              onChange={(e) => setPaymentUpiId(e.target.value)}
+                              required
+                            />
+                            <p className="text-[8px] font-mono text-gray-600 uppercase tracking-wider">This UPI address will be utilized for user-facing copies and verification links.</p>
+                         </div>
+
+                         {/* QR Code File Input */}
+                         <div className="space-y-2">
+                            <label className="text-[8px] font-mono font-black text-gray-400 uppercase tracking-widest block">Custom Payment QR Code Image</label>
+                            <div className="flex items-center gap-4">
+                               <div className="flex-1">
+                                 <input 
+                                   type="file" 
+                                   accept="image/*"
+                                   id="payment-qr-file"
+                                   onChange={(e) => {
+                                     if (e.target.files && e.target.files[0]) {
+                                       setPaymentQrFile(e.target.files[0]);
+                                     }
+                                   }}
+                                   className="hidden"
+                                 />
+                                 <label 
+                                   htmlFor="payment-qr-file"
+                                   className="flex items-center justify-center gap-2 cursor-pointer w-full bg-white/5 border border-dashed border-white/10 hover:border-red-600/40 hover:bg-white/10 rounded-lg p-3 text-xs font-mono text-yellow-500 uppercase transition-all select-none"
+                                 >
+                                   <Upload size={14} />
+                                   <span>{paymentQrFile ? paymentQrFile.name : 'Choose Image File'}</span>
+                                 </label>
+                               </div>
+
+                               {/* Preview Box */}
+                               {(paymentQrFile || paymentQrUrl) && (
+                                 <div className="w-14 h-14 bg-white p-0.5 rounded border border-white/20 shrink-0 flex items-center justify-center relative overflow-hidden group">
+                                   <img 
+                                     src={paymentQrFile ? URL.createObjectURL(paymentQrFile) : paymentQrUrl} 
+                                     alt="QR Preview" 
+                                     className="w-full h-full object-contain"
+                                   />
+                                 </div>
+                               )}
+                            </div>
+                            <p className="text-[8px] font-mono text-gray-600 uppercase tracking-wider">Upload JPEG or PNG files. Will fallback to previous storage paths if left vacant.</p>
+                         </div>
+                      </div>
+
+                      <div className="pt-4 border-t border-white/5 flex justify-end">
+                         <button 
+                           type="submit" 
+                           disabled={paymentConfigLoading}
+                           className="px-6 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-red-800 text-white font-mono text-xs font-black uppercase tracking-widest rounded-lg transition-all flex items-center gap-2"
+                         >
+                           {paymentConfigLoading ? 'SYNCING...' : 'SAVE CONFIGURATION'}
+                         </button>
+                      </div>
+                   </form>
+                </section>
+             </div>
+          )}
       </main>
+
+      {/* Lightbox Receipt Preview Modal Overlay */}
+      {selectedScreenshotUrl && (
+         <div 
+           className="fixed inset-0 z-50 flex items-center justify-center bg-black/95 p-4 backdrop-blur-md transition-all duration-300 animate-fade-in"
+           onClick={() => setSelectedScreenshotUrl(null)}
+         >
+            <div className="absolute top-4 right-4 z-50">
+               <button 
+                 onClick={() => setSelectedScreenshotUrl(null)}
+                 className="p-2 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all font-mono text-xs uppercase tracking-widest font-black flex items-center gap-2"
+               >
+                  <span>Close</span>
+                  <span className="text-[14px]">✕</span>
+               </button>
+            </div>
+            <div 
+              className="relative max-w-4xl max-h-[85vh] overflow-hidden rounded-xl border border-white/10 shadow-[0_0_50px_rgba(0,0,0,0.8)] bg-black"
+              onClick={(e) => e.stopPropagation()}
+            >
+               <img 
+                 src={selectedScreenshotUrl} 
+                 alt="High Res Receipt Proof" 
+                 className="max-w-full max-h-[80vh] object-contain mx-auto" 
+                 referrerPolicy="no-referrer"
+               />
+               <div className="p-3 bg-black/80 border-t border-white/5 text-center font-mono text-[10px] text-gray-400 uppercase tracking-widest">
+                  Subscriber Receipt Ledger Preview Node • Click outside to escape
+               </div>
+            </div>
+         </div>
+      )}
     </div>
   );
 }

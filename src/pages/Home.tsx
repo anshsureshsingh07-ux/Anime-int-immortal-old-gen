@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { auth } from '../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { FALLBACK_AIRING } from '../lib/jikanFallback';
 
 export default function Home() {
   const [news, setNews] = useState<any[]>([]);
@@ -67,9 +68,8 @@ export default function Home() {
       // Releases
       const { data: releaseData } = await supabase
         .from('release_tracker')
-        .select('*')
-        .order('release_date', { ascending: true })
-        .limit(10);
+        .select('id, airing_time:time_slot, title, status_text:status')
+        .limit(15);
 
       // Polls (Legacy poll)
       const { data: pollData } = await supabase
@@ -153,12 +153,15 @@ export default function Home() {
         }
         const data = await res.json();
         if (isMounted) {
-          setFeaturedAnime(data.data || []);
+          setFeaturedAnime(data.data || FALLBACK_AIRING);
           setLoading(false);
         }
       } catch (err) {
-        console.error('Jikan fetch failed:', err);
-        if (isMounted) setLoading(false);
+        console.warn('Jikan fetch failed, loaded high-fidelity offline backup:', err);
+        if (isMounted) {
+          setFeaturedAnime(FALLBACK_AIRING);
+          setLoading(false);
+        }
       }
     };
 
@@ -278,26 +281,47 @@ export default function Home() {
     return Math.round((count / pollVotes.length) * 100);
   };
 
+  const formatAiringTime = (airingTime: any) => {
+    if (!airingTime) return '00:00 UTC';
+    const str = String(airingTime).trim();
+    if (/^\d{1,2}:\d{2}(\s*[aApP][mM])?$/.test(str)) {
+      return str;
+    }
+    try {
+      const d = new Date(str);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      }
+    } catch (e) {}
+    return str;
+  };
+
   return (
     <div className="p-0">
       {/* Top Release Tracker (Marquee) */}
-      {releases.length > 0 && (
-        <div className="bg-red-600/10 border-b border-red-600/20 py-2 overflow-hidden whitespace-nowrap">
-          <div className="flex animate-marquee-slower">
-            {Array(3).fill(null).map((_, i) => (
-              <div key={i} className="flex items-center gap-10 px-10">
-                {releases.map(item => (
-                  <div key={item.id} className="flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em]">
-                    <span className="text-red-500 font-mono">0{item.episode || 1} •</span>
-                    <span className="text-white">{item.title}</span>
-                    <span className="text-gray-500 font-mono italic">[{new Date(item.release_date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}]</span>
+      <div className="py-2 overflow-hidden whitespace-nowrap border-b" style={{ backgroundColor: 'var(--faction-primary-glow)', borderBottomColor: 'var(--faction-border)' }}>
+        <div className="flex animate-marquee-slower">
+          {Array(3).fill(null).map((_, i) => (
+            <div key={i} className="flex items-center gap-10 px-10 shrink-0">
+              {releases.length === 0 ? (
+                Array(4).fill(null).map((_, idx) => (
+                  <div key={`${i}-${idx}`} className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] whitespace-nowrap shrink-0" style={{ color: 'var(--faction-primary)' }}>
+                    SYS OPERATIONAL • BROADCAST FEED SLEEPING
                   </div>
-                ))}
-              </div>
-            ))}
-          </div>
+                ))
+              ) : (
+                releases.map(item => (
+                  <div key={`${i}-${item.id}`} className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em] whitespace-nowrap shrink-0">
+                    <span className="font-mono" style={{ color: 'var(--faction-primary)' }}>{formatAiringTime(item.airing_time)} •</span>
+                    <span className="text-white">{item.title}</span>
+                    <span className="text-gray-500 font-mono italic">[{item.status_text || 'ACTIVE'}]</span>
+                  </div>
+                ))
+              )}
+            </div>
+          ))}
         </div>
-      )}
+      </div>
 
       <div className="p-8 grid grid-cols-12 gap-8">
         {/* Left Column: News & Feed */}
@@ -310,17 +334,17 @@ export default function Home() {
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-1000 brightness-75"
             />
             <div className="absolute top-6 left-6 z-20 flex gap-2">
-              <span className="bg-[#FF0000] text-white text-[10px] font-black px-2 py-1 uppercase rounded">Breaking</span>
+              <span className="text-white text-[10px] font-black px-2 py-1 uppercase rounded" style={{ backgroundColor: 'var(--faction-primary)' }}>Breaking</span>
               <span className="bg-black/60 text-white text-[10px] font-black px-2 py-1 uppercase rounded backdrop-blur-md">Featured</span>
             </div>
             <div className="absolute bottom-8 left-8 right-8 z-20">
               {isEditingBreaking ? (
-                <div className="flex flex-col gap-2 bg-[#050505]/95 p-4 rounded-xl border border-red-600/50 backdrop-blur-md shadow-[0_0_30px_rgba(220,38,38,0.2)]">
-                  <span className="text-[9px] font-mono uppercase text-[#FF0000] tracking-widest font-black">Syncing Node Terminal Ticker</span>
+                <div className="flex flex-col gap-2 bg-[#050505]/95 p-4 rounded-xl border backdrop-blur-md shadow-faction-glow" style={{ borderColor: 'var(--faction-primary)' }}>
+                  <span className="text-[9px] font-mono uppercase tracking-widest font-black" style={{ color: 'var(--faction-primary)' }}>Syncing Node Terminal Ticker</span>
                   <textarea
                     value={tempBreakingText}
                     onChange={(e) => setTempBreakingText(e.target.value)}
-                    className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-xs font-mono text-white focus:border-red-600 outline-none"
+                    className="w-full bg-black/50 border border-white/10 rounded-lg p-2.5 text-xs font-mono text-white outline-none focus:border-faction-primary"
                     rows={2}
                   />
                   <div className="flex justify-end gap-2">
@@ -334,7 +358,7 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={handleSaveBreaking}
-                      className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-[10px] font-black uppercase rounded text-white transition-all shadow-[0_0_15px_rgba(220,38,38,0.4)]"
+                      className="px-3 py-1.5 text-[10px] font-black uppercase rounded text-white transition-all shadow-faction-glow bg-faction-primary hover:opacity-90"
                     >
                       Sync Banner
                     </button>
@@ -351,7 +375,7 @@ export default function Home() {
                         setTempBreakingText(breakingNews?.text || breakingNews?.title || "Vanguard Ops: Archives System Expansion Initialized");
                         setIsEditingBreaking(true);
                       }}
-                      className="p-2 bg-black/60 hover:bg-red-600 text-white rounded-lg border border-white/10 hover:border-red-600/50 transition-all flex items-center justify-center shrink-0 self-center shadow-lg"
+                      className="p-2 bg-black/60 text-white rounded-lg border border-white/10 transition-all flex items-center justify-center shrink-0 self-center shadow-lg hover:bg-faction-primary hover:border-faction-primary"
                       title="Edit Terminal Banner"
                     >
                       <span className="text-[9px] font-black uppercase tracking-widest mr-1.5 hidden md:inline">Edit Banner</span>
@@ -362,9 +386,9 @@ export default function Home() {
               )}
               <div className="flex items-center gap-4 mt-3 text-xs text-gray-300 font-medium">
                 <span>Network Node 01</span>
-                <span className="text-[#FF0000]">•</span>
+                <span className="text-faction-primary">•</span>
                 <span>Active Stream</span>
-                <span className="text-[#FF0000]">•</span>
+                <span className="text-faction-primary">•</span>
                 <span>Neural Broadcaster</span>
               </div>
             </div>
@@ -372,9 +396,9 @@ export default function Home() {
 
           <div className="flex items-center justify-between mt-2 mb-2 border-b border-[#1F1F1F] pb-2">
              <h2 className="text-xs font-black uppercase tracking-widest text-white flex items-center gap-2">
-               <TrendingUp size={14} className="text-[#FF0000]" /> Intelligence <span className="text-[#FF0000]">Feed</span>
+               <TrendingUp size={14} style={{ color: 'var(--faction-primary)' }} /> Intelligence <span style={{ color: 'var(--faction-primary)' }}>Feed</span>
              </h2>
-             <Link to="/news" className="text-[10px] font-mono text-gray-600 uppercase hover:text-[#FF0000] flex items-center gap-1 transition-colors">
+             <Link to="/news" className="text-[10px] font-mono text-gray-600 uppercase flex items-center gap-1 transition-colors hover:text-faction-primary">
                 View All <ChevronRight size={12} />
              </Link>
           </div>
@@ -391,14 +415,14 @@ export default function Home() {
                 >
                   <Link to={`/news/${item.id}`} className="absolute inset-0 z-10" aria-label={`View ${item.title}`} />
                   <div className="h-40 w-full bg-[#1A1A1A] rounded-lg overflow-hidden mb-3 relative">
-                    <img src={item.image || undefined} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
-                    <div className="absolute top-2 left-2">
-                      <span className="bg-red-600 text-[8px] font-black text-white px-2 py-1 rounded uppercase tracking-widest shadow-2xl">
-                        {item.category}
-                      </span>
-                    </div>
+                     <img src={item.image || undefined} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                     <div className="absolute top-2 left-2">
+                       <span className="text-[8px] font-black text-white px-2 py-1 rounded uppercase tracking-widest shadow-2xl bg-faction-primary">
+                         {item.category}
+                       </span>
+                     </div>
                   </div>
-                  <h3 className="text-sm font-bold text-white mt-1 group-hover:text-[#FF0000] transition-colors line-clamp-1">{item.title}</h3>
+                  <h3 className="text-sm font-bold text-white mt-1 group-hover:text-faction-primary transition-colors line-clamp-1">{item.title}</h3>
                   <p className="text-[11px] text-gray-500 mt-2 line-clamp-2 font-mono leading-relaxed">
                     {item.description}
                   </p>
@@ -432,8 +456,8 @@ export default function Home() {
         <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
           <section className="bg-[#111] rounded-xl border border-[#1F1F1F] p-5">
             <h3 className="text-xs font-black uppercase tracking-widest text-white mb-6 border-b border-[#1F1F1F] pb-3 flex justify-between items-center">
-              <span className="flex items-center gap-2"><Flame size={14} className="text-[#FF0000]" /> Trending Now</span>
-              <Link to="/database" className="text-[10px] text-[#FF0000] hover:underline">Full Database</Link>
+              <span className="flex items-center gap-2"><Flame size={14} style={{ color: 'var(--faction-primary)' }} /> Trending Now</span>
+              <Link to="/database" className="text-[10px] hover:underline" style={{ color: 'var(--faction-primary)' }}>Full Database</Link>
             </h3>
             <div className="space-y-5">
               {featuredAnime.slice(0, 6).map((anime, idx) => (
@@ -444,10 +468,10 @@ export default function Home() {
                   transition={{ delay: idx * 0.05 }}
                   className="flex items-center gap-3 group cursor-pointer"
                 >
-                  <span className="text-xl font-black text-[#FF0000]/20 group-hover:text-[#FF0000] transition-colors italic w-6">0{idx + 1}</span>
+                  <span className="text-xl font-black transition-colors italic w-6 group-hover:text-faction-primary" style={{ color: 'var(--faction-primary)', opacity: 0.35 }}>0{idx + 1}</span>
                   <img src={anime.images.jpg.image_url || undefined} className="w-10 h-14 bg-[#1A1A1A] rounded object-cover border border-[#222]" />
                   <div className="min-w-0">
-                    <div className="text-xs font-bold text-white group-hover:text-[#FF0000] transition-colors truncate">{anime.title}</div>
+                    <div className="text-xs font-bold text-white group-hover:text-faction-primary transition-colors truncate">{anime.title}</div>
                     <div className="text-[10px] text-gray-500 uppercase font-mono truncate">{anime.studios?.[0]?.name || 'Studio'} • {anime.type}</div>
                   </div>
                   <div className="ml-auto text-[10px] text-green-500 font-bold font-mono">+{Math.floor(Math.random() * 20)}%</div>
@@ -457,7 +481,7 @@ export default function Home() {
           </section>
 
           <section className="bg-[#111] rounded-xl border border-[#1F1F1F] p-5">
-             <h3 className="text-xs font-black uppercase tracking-widest text-[#FF0000] mb-4 flex items-center justify-between">
+             <h3 className="text-xs font-black uppercase tracking-widest mb-4 flex items-center justify-between" style={{ color: 'var(--faction-primary)' }}>
                <span className="flex items-center gap-2"><MessageSquare size={14} /> Community Poll</span>
                {isCurrentUserAdmin && (
                  <button 
@@ -527,14 +551,14 @@ export default function Home() {
                   }}
                   className="space-y-3 bg-black/40 p-3.5 rounded-lg border border-white/5 font-mono text-xs shadow-inner"
                 >
-                  <div className="text-[10px] text-[#FF0000] uppercase font-black tracking-widest">Configure Consensus Core</div>
+                  <div className="text-[10px] uppercase font-black tracking-widest" style={{ color: 'var(--faction-primary)' }}>Configure Consensus Core</div>
                   <div>
                     <label className="text-[8px] text-gray-500 uppercase font-black tracking-wider block mb-1">Poll Question</label>
                     <input 
                       required
                       value={pollEditForm.question}
                       onChange={e => setPollEditForm({...pollEditForm, question: e.target.value})}
-                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-md p-2 focus:border-[#FF0000] outline-none text-white text-[11px]"
+                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-md p-2 focus:border-[var(--faction-primary)] outline-none text-white text-[11px] transition-colors"
                     />
                   </div>
                   <div>
@@ -543,7 +567,7 @@ export default function Home() {
                       required
                       value={pollEditForm.option_a}
                       onChange={e => setPollEditForm({...pollEditForm, option_a: e.target.value})}
-                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-md p-2 focus:border-[#FF0000] outline-none text-white text-[11px]"
+                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-md p-2 focus:border-[var(--faction-primary)] outline-none text-white text-[11px] transition-colors"
                     />
                   </div>
                   <div>
@@ -552,7 +576,7 @@ export default function Home() {
                       required
                       value={pollEditForm.option_b}
                       onChange={e => setPollEditForm({...pollEditForm, option_b: e.target.value})}
-                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-md p-2 focus:border-[#FF0000] outline-none text-white text-[11px]"
+                      className="w-full bg-[#0a0a0a] border border-white/10 rounded-md p-2 focus:border-[var(--faction-primary)] outline-none text-white text-[11px] transition-colors"
                     />
                   </div>
                   <div className="flex gap-2 pt-1.5">
@@ -565,7 +589,7 @@ export default function Home() {
                     </button>
                     <button 
                       type="submit" 
-                      className="flex-1 py-1.5 bg-red-600 hover:bg-red-700 text-white text-[9px] font-black uppercase tracking-widest rounded transition-all shadow-[0_0_10px_rgba(220,38,38,0.2)]"
+                      className="flex-1 py-1.5 text-white text-[9px] font-black uppercase tracking-widest rounded transition-all shadow-faction-glow bg-faction-primary hover:opacity-85"
                     >
                       Sync Core
                     </button>
@@ -586,20 +610,19 @@ export default function Home() {
                             disabled={votedOption !== null}
                             onClick={() => handleCommunityVote(optKey as any)}
                             className={`relative h-12 w-full bg-[#050505] border rounded-lg flex items-center px-4 group overflow-hidden transition-all text-left ${
-                              isMyVote ? 'border-red-600 shadow-[0_0_15px_rgba(220,38,38,0.15)]' : 'border-[#1F1F1F] hover:border-gray-500'
+                              isMyVote ? 'border-faction-primary shadow-faction-glow' : 'border-[#1F1F1F] hover:border-gray-500'
                             }`}
+                            style={isMyVote ? { borderColor: 'var(--faction-primary)' } : {}}
                           >
                              <div 
-                               className="absolute inset-y-0 left-0 bg-red-600/10 transition-all duration-1000" 
-                               style={{ width: `${percent}%` }}
+                               className="absolute inset-y-0 left-0 transition-all duration-1000" 
+                               style={{ width: `${percent}%`, backgroundColor: 'var(--faction-primary-glow)' }}
                              />
-                             <span className={`relative z-10 text-[11px] font-black italic uppercase tracking-tighter transition-colors ${
-                               isMyVote ? 'text-red-500' : 'text-white'
-                             }`}>
+                             <span className="relative z-10 text-[11px] font-black italic uppercase tracking-tighter transition-colors text-white" style={isMyVote ? { color: 'var(--faction-primary)' } : {}}>
                                {optText}
                              </span>
                              {votedOption !== null && (
-                               <span className="relative z-10 ml-auto text-[10px] font-mono text-[#FF0000] font-black">
+                               <span className="relative z-10 ml-auto text-[10px] font-mono font-black animate-pulse" style={{ color: 'var(--faction-primary)' }}>
                                  {percent}% ({votesCount}v)
                                </span>
                              )}
@@ -618,13 +641,13 @@ export default function Home() {
              )}
           </section>
 
-          <div className="p-6 bg-gradient-to-br from-[#1A0000] to-[#050505] border border-[#FF0000]/20 rounded-xl relative overflow-hidden">
-             <div className="absolute top-0 right-0 p-2 opacity-5">
+          <div className="p-6 bg-[#111] border rounded-xl relative overflow-hidden" style={{ borderColor: 'var(--faction-border)' }}>
+             <div className="absolute top-0 right-0 p-2 opacity-5" style={{ color: 'var(--faction-primary)' }}>
                 <Flame size={80} />
              </div>
-             <p className="text-[9px] text-[#FF0000] font-black uppercase tracking-[0.3em] mb-3">Vanguard Ops</p>
+             <p className="text-[9px] font-black uppercase tracking-[0.3em] mb-3" style={{ color: 'var(--faction-primary)' }}>Vanguard Ops</p>
              <h4 className="text-sm font-bold text-white mb-4 leading-tight">Join the news writing team to gain early access to archives.</h4>
-             <Link to="/recruit" className="inline-block px-4 py-2 bg-[#FF0000] text-white text-[10px] font-black uppercase tracking-widest rounded hover:bg-[#CC0000] transition-colors">Apply Node</Link>
+             <Link to="/recruit" className="inline-block px-4 py-2 text-white text-[10px] font-black uppercase tracking-widest rounded transition-all hover:opacity-90 shadow-faction-glow bg-faction-primary">Apply Node</Link>
           </div>
         </div>
       </div>

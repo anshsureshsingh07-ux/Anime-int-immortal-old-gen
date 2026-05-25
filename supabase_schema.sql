@@ -6,6 +6,9 @@ CREATE TABLE profiles (
   avatar_url TEXT,
   profile_photo_url TEXT,
   role TEXT DEFAULT 'member' CHECK (role IN ('member', 'news_writer', 'moderator', 'admin')),
+  xp INT DEFAULT 0,
+  level INT DEFAULT 1,
+  is_premium BOOLEAN DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -208,3 +211,79 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
+
+-- 14. Anime Streaming Features (Tables & Policies)
+CREATE TABLE anime_series (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  title TEXT NOT NULL,
+  thumbnail_url TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE anime_episodes (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  series_id UUID REFERENCES anime_series(id) ON DELETE CASCADE,
+  episode_number INTEGER NOT NULL,
+  title TEXT,
+  episode_description TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE anime_streams (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  episode_id UUID REFERENCES anime_episodes(id) ON DELETE CASCADE,
+  language_region TEXT NOT NULL, -- e.g., 'English Sub', 'Hindi Dub'
+  stream_url TEXT NOT NULL, -- embed content
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS on new tables
+ALTER TABLE anime_series ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anime_episodes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE anime_streams ENABLE ROW LEVEL SECURITY;
+
+-- Standard Public SELECT privileges for streaming
+CREATE POLICY "Public Anime Series Access" ON anime_series FOR SELECT USING (true);
+CREATE POLICY "Public Anime Episodes Access" ON anime_episodes FOR SELECT USING (true);
+CREATE POLICY "Public Anime Streams Access" ON anime_streams FOR SELECT USING (true);
+
+-- Admin Privileges for insertion/deletion/updates
+CREATE POLICY "Admin Anime Series Management" ON anime_series FOR ALL 
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
+
+CREATE POLICY "Admin Anime Episodes Management" ON anime_episodes FOR ALL 
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
+
+CREATE POLICY "Admin Anime Streams Management" ON anime_streams FOR ALL 
+  USING (EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
+
+
+-- 15. Premium/Upgrade Ledger (Payment Transactions)
+CREATE TABLE payment_transactions (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  user_email TEXT,
+  username TEXT,
+  transaction_id TEXT NOT NULL,
+  status TEXT DEFAULT 'pending', -- 'pending', 'verified', 'rejected'
+  tier TEXT DEFAULT 'premium', -- 'plus', 'god', 'monarch'
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS
+ALTER TABLE payment_transactions ENABLE ROW LEVEL SECURITY;
+
+-- Users can view their own transactions and insert them
+CREATE POLICY "Users can insert their own payment transactions" ON payment_transactions FOR INSERT 
+  WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can select their own payment transactions" ON payment_transactions FOR SELECT
+  USING (auth.uid() = user_id);
+
+-- Admins can manage all transactions
+CREATE POLICY "Admins can manage all payment transactions" ON payment_transactions FOR ALL
+  USING (
+    EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')
+    OR auth.jwt()->>'email' IN ('anshsureshsingh07@gmail.com', 'animeintofficial@gmail.com')
+  );
+

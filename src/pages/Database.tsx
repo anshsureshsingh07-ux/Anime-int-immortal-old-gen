@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Search, Filter, Play, Star, Calendar, Grid, List as ListIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { searchFallback, FALLBACK_TOP } from '../lib/jikanFallback';
 
 export default function AnimeDatabase() {
   const [animeList, setAnimeList] = useState<any[]>([]);
@@ -59,7 +60,12 @@ export default function AnimeDatabase() {
       }
     } catch (innerErr: any) {
       if (innerErr.name !== 'AbortError') {
-        console.error('Jikan fetch error:', innerErr);
+        console.warn('Jikan fetch error, loading offline database fallback:', innerErr);
+        if (p === 1) {
+          const fallbackData = query ? searchFallback(query) : FALLBACK_TOP;
+          setAnimeList(fallbackData);
+          setHasMore(false);
+        }
       }
     } finally {
       if (!signal?.aborted) {
@@ -117,6 +123,63 @@ export default function AnimeDatabase() {
         </div>
       </header>
 
+      {/* Spring Archives Spotlight (April & May Ingest) */}
+      {!searchQuery && page === 1 && (
+        <section className="mb-12 bg-gradient-to-r from-red-950/20 via-[#0a0a0a] to-[#050505] border border-red-900/10 p-6 md:p-8 rounded-2xl relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-red-600/5 rounded-full blur-2xl pointer-events-none" />
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6 border-b border-white/5 pb-4">
+            <div>
+              <h2 className="text-sm font-black text-red-500 uppercase tracking-[0.2em] flex items-center gap-2">
+                <Calendar size={13} className="text-red-500 animate-pulse" /> 🌸 SPRING ARCHIVES: APRIL/MAY SEASONAL ARRIVALS
+              </h2>
+              <p className="text-[10px] font-mono text-gray-500 uppercase tracking-widest mt-0.5">Newly verified high-priority tactical story records</p>
+            </div>
+            <span className="text-[8px] font-mono text-red-600 uppercase tracking-widest bg-red-600/10 px-2.5 py-0.5 rounded border border-red-500/20">Status: Fully Indexed</span>
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+            {[
+              { id: "52588", title: "Kaiju No. 8", release: "April 13th", score: "8.38", desc: "Aired Spring", image: "https://cdn.myanimelist.net/images/anime/1066/141873.jpg" },
+              { id: "55701", title: "Demon Slayer: Hashira", release: "May 12th", score: "8.45", desc: "Training Arc", image: "https://cdn.myanimelist.net/images/anime/1199/142340.jpg" },
+              { id: "54390", title: "Wind Breaker", release: "April 5th", score: "8.12", desc: "CloverWorks", image: "https://cdn.myanimelist.net/images/anime/1660/141444.jpg" },
+              { id: "52616", title: "Konosuba Season 3", release: "April 10th", score: "8.48", desc: "Comedy Fantasy", image: "https://cdn.myanimelist.net/images/anime/1655/141427.jpg" },
+              { id: "55252", title: "My Hero Acad. 7", release: "May 4th", score: "8.21", desc: "Bones Studio", image: "https://cdn.myanimelist.net/images/anime/1908/142491.jpg" }
+            ].map((spr) => (
+              <motion.div 
+                key={spr.id}
+                whileHover={{ y: -4 }}
+                className="bg-black/60 border border-white/5 hover:border-red-600/30 rounded-xl overflow-hidden p-2.5 transition-all duration-300 group cursor-pointer"
+              >
+                <Link to={`/anime/${spr.id}`}>
+                  <div className="relative aspect-[3/4] rounded-lg overflow-hidden mb-2.5">
+                    <img 
+                      src={spr.image} 
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+                      alt={spr.title} 
+                      onError={(e) => {
+                        // fallback image
+                        (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=300";
+                      }}
+                    />
+                    <div className="absolute top-1.5 left-1.5 bg-black/80 backdrop-blur-sm shadow-md px-1.5 py-0.5 rounded text-[7px] font-black text-red-500 uppercase tracking-tighter">
+                      {spr.release}
+                    </div>
+                    <div className="absolute bottom-1.5 right-1.5 bg-[#FF0000] shadow-md px-1.5 py-0.5 rounded text-[7px] font-black text-white flex items-center gap-1">
+                      <Star size={7} fill="currentColor" /> {spr.score}
+                    </div>
+                  </div>
+                  <h3 className="text-[11px] font-black text-gray-200 group-hover:text-white truncate font-mono uppercase tracking-tight leading-none mb-1">
+                    {spr.title}
+                  </h3>
+                  <p className="text-[8px] text-gray-600 font-mono truncate uppercase">{spr.desc}</p>
+                </Link>
+              </motion.div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Main Database Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-6">
         {page === 1 && localAnime.length > 0 && !searchQuery && localAnime.map((anime, idx) => (
            <motion.div
