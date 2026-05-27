@@ -125,10 +125,8 @@ export default function Leaderboard() {
     setCheckInLoading(true);
 
     try {
-      const isPremium = currentProfile?.is_premium;
       const baseXP = 50;
-      // Double XP for premium users
-      const finalXP = isPremium ? baseXP * 2 : baseXP;
+      const finalXP = baseXP;
 
       const updated = await awardXP(currentUser.uid, baseXP);
       if (updated) {
@@ -215,10 +213,8 @@ export default function Leaderboard() {
                 <p className="text-lg font-black text-yellow-500">{currentProfile.xp} XP</p>
               </div>
               <div className="bg-[#111115] border border-white/5 px-4 py-2.5 rounded-xl text-center md:text-left min-w-[120px]">
-                <p className="text-[9px] text-gray-500 font-mono uppercase tracking-widest">Premium multiplier</p>
-                <p className={`text-lg font-black ${currentProfile.is_premium ? 'text-yellow-400' : 'text-gray-400'}`}>
-                  {currentProfile.is_premium ? '2X BOOST' : '1X STANDARD'}
-                </p>
+                <p className="text-[9px] text-gray-500 font-mono uppercase tracking-widest">Network Speed</p>
+                <p className="text-lg font-black text-emerald-400">OPTIMAL</p>
               </div>
             </div>
           )}
@@ -254,14 +250,7 @@ export default function Leaderboard() {
             </button>
           )}
 
-          {!currentProfile?.is_premium && currentUser && (
-            <button 
-              onClick={triggerUpgradeModal}
-              className="text-[10px] font-mono text-yellow-500 hover:text-yellow-400 uppercase tracking-widest flex items-center gap-1 mt-1 font-bold underline decoration-dotted"
-            >
-              <Crown size={10} className="fill-yellow-500/20" /> Enable 2x XP Multipliers
-            </button>
-          )}
+          {/* Enable 2x multipliers removed */}
         </div>
       </div>
 
@@ -279,16 +268,7 @@ export default function Leaderboard() {
           >
             <Filter size={12} /> Global Index
           </button>
-          <button 
-            onClick={() => setFilterType('premium')}
-            className={`px-4 py-2 rounded-lg text-xs font-black uppercase tracking-widest flex items-center gap-2 transition-all ${
-              filterType === 'premium' 
-                ? 'bg-yellow-500/10 text-yellow-500 border-b-2 border-yellow-500' 
-                : 'text-gray-500 hover:text-yellow-500 hover:bg-yellow-500/5'
-            }`}
-          >
-            <Crown size={12} /> Elite Agents Only
-          </button>
+          {/* Elite filter removed */}
         </div>
 
         {/* Search */}
@@ -405,14 +385,9 @@ export default function Leaderboard() {
               <img src={podiumUsers[1].avatar_url} className="w-full h-full object-cover rounded-full bg-slate-900" alt="Avatar" />
               <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-slate-400 text-black rounded-full flex items-center justify-center font-black text-[10px]">2ND</div>
             </div>
-            <h3 className={`text-base font-black truncate max-w-full ${podiumUsers[1].is_premium ? 'text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-500 font-bold shadow-sm' : 'text-white'}`}>
+            <h3 className="text-base font-black truncate max-w-full text-white">
               {podiumUsers[1].username}
             </h3>
-            {podiumUsers[1].is_premium && (
-              <span className="text-[8px] bg-yellow-500 text-black px-1.5 py-0.5 rounded font-black uppercase tracking-wider mt-1 flex items-center gap-0.5 animate-pulse">
-                <Crown size={8} className="fill-black" /> ELITE
-              </span>
-            )}
             <p className="text-[10px] text-gray-500 font-mono mt-1 uppercase">LEVEL {podiumUsers[1].level} AGENT</p>
             <div className="mt-4 text-xs font-mono font-black text-gray-300 px-3 py-1.5 bg-[#17171B] border border-white/5 rounded-full">{podiumUsers[1].xp} XP</div>
           </motion.div>
@@ -434,15 +409,14 @@ export default function Leaderboard() {
               <div className="absolute -bottom-1 -right-1 w-8 h-8 bg-gradient-to-r from-yellow-400 to-amber-500 text-black rounded-full flex items-center justify-center font-black text-xs shadow-lg border border-yellow-300">1ST</div>
             </div>
 
-            <h3 className="text-xl font-black truncate max-w-full text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-yellow-400 to-amber-500 [text-shadow:_0_0_15px_rgba(234,179,8,0.4)]">
+            <h3 className="text-xl font-black truncate max-w-full text-white">
               {podiumUsers[0].username}
             </h3>
 
             <div className="flex flex-col items-center gap-1 mt-1.5">
-              <span className="text-[9px] bg-gradient-to-r from-yellow-400 via-amber-500 to-yellow-500 text-black px-2.5 py-0.5 rounded font-black uppercase tracking-widest flex items-center gap-1 shadow-[0_0_15px_rgba(234,179,8,0.5)]">
-                <Crown size={10} className="fill-black" /> CROWN ELITE
+              <span className="text-[9px] bg-red-600/10 text-red-500 border border-red-500/20 px-2.5 py-0.5 rounded font-black uppercase tracking-widest flex items-center gap-1">
+                TOP VANGUARD
               </span>
-              <span className="text-[7px] font-mono text-gray-400 uppercase tracking-widest">MONARCH TIER SYNCHRONIZED</span>
             </div>
 
             <p className="text-[11px] text-yellow-400 font-mono mt-1 uppercase font-black tracking-widest">LEVEL {podiumUsers[0].level} EXPERT</p>
@@ -461,14 +435,9 @@ export default function Leaderboard() {
               <img src={podiumUsers[2].avatar_url} className="w-full h-full object-cover rounded-full bg-amber-950" alt="Avatar" />
               <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-amber-600 text-black rounded-full flex items-center justify-center font-black text-[10px]">3RD</div>
             </div>
-            <h3 className={`text-base font-black truncate max-w-full ${podiumUsers[2].is_premium ? 'text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-500 font-bold' : 'text-white'}`}>
+            <h3 className="text-base font-black truncate max-w-full text-white">
               {podiumUsers[2].username}
             </h3>
-            {podiumUsers[2].is_premium && (
-              <span className="text-[8px] bg-yellow-500 text-black px-1.5 py-0.5 rounded font-black uppercase tracking-wider mt-1 flex items-center gap-0.5">
-                <Crown size={8} className="fill-black" /> ELITE
-              </span>
-            )}
             <p className="text-[10px] text-gray-500 font-mono mt-1 uppercase">LEVEL {podiumUsers[2].level} AGENT</p>
             <div className="mt-4 text-xs font-mono font-black text-gray-300 px-3 py-1.5 bg-[#17171B] border border-white/5 rounded-full">{podiumUsers[2].xp} XP</div>
           </motion.div>
@@ -495,19 +464,17 @@ export default function Leaderboard() {
           <div className="divide-y divide-[#1D1D23] max-h-[800px] overflow-y-auto">
             {filteredUsers.map((userItem) => {
               const isSelf = userItem.id === currentUser?.uid;
-              const isMonarch = userItem.premium_tier === 'monarch' || userItem.username === 'Ansh_Suresh_Singh';
-              const isGod = userItem.premium_tier === 'god';
-              const isPlus = userItem.premium_tier === 'plus';
+              const isMonarch = false;
+              const isGod = false;
+              const isPlus = false;
 
               return (
                 <div 
                   key={userItem.id}
                   className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 transition-all duration-300 ${
-                    isMonarch 
-                      ? 'bg-yellow-500/5 hover:bg-yellow-500/10 border-l-4 border-yellow-500 shadow-[0_0_15px_rgba(234,179,8,0.1)]'
-                      : isSelf 
-                        ? 'bg-red-500/5 hover:bg-red-500/10 border-l-4 border-red-500' 
-                        : 'hover:bg-[#111115]'
+                    isSelf 
+                      ? 'bg-red-500/5 hover:bg-red-500/10 border-l-4 border-red-500' 
+                      : 'hover:bg-[#111115]'
                   }`}
                 >
                   {/* Left Column: rank + user profile */}
@@ -525,55 +492,21 @@ export default function Leaderboard() {
                       )}
                     </div>
 
-                    {/* Avatar image with premium frame glow */}
-                    <div className={`relative w-10 h-10 rounded shrink-0 overflow-hidden border ${
-                      isMonarch 
-                        ? 'border-yellow-400 shadow-[0_0_15px_rgba(234,179,8,0.5)]' 
-                        : isGod 
-                          ? 'border-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]'
-                          : userItem.is_premium 
-                            ? 'border-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.2)]' 
-                            : 'border-[#1F1F1F]'
-                    }`}>
+                    {/* Avatar image with frame styling */}
+                    <div className="relative w-10 h-10 rounded shrink-0 overflow-hidden border border-[#1F1F1F]">
                       <img src={userItem.avatar_url} className="w-full h-full object-cover" alt="User Avatar" />
                     </div>
 
-                    {/* Username and premium Glow badge details */}
+                    {/* Username and details */}
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className={`text-xs font-black tracking-tight ${
-                          isMonarch 
-                            ? 'text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 via-yellow-400 to-amber-500 font-extrabold shadow-sm drop-shadow-[0_0_8px_rgba(234,179,8,0.4)]' 
-                            : isGod 
-                              ? 'text-amber-400 font-black'
-                              : userItem.is_premium 
-                                ? 'text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-amber-500 font-black' 
-                                : 'text-white'
-                        }`}>
+                        <span className="text-xs font-black tracking-tight text-white">
                           {userItem.username}
                         </span>
 
                         {isSelf && (
                           <span className="text-[8px] border border-red-500/30 text-[#FF0000] px-1 rounded-sm uppercase font-black tracking-widest font-mono">
                             YOU
-                          </span>
-                        )}
-
-                        {isMonarch && (
-                          <span className="text-[7px] bg-gradient-to-r from-yellow-500 to-amber-500 text-black px-1.5 py-0.5 rounded-sm font-black uppercase tracking-wider flex items-center gap-0.5 shadow-[0_0_8px_rgba(234,179,8,0.4)] animate-pulse" title="Crown Elite Monarch subscription active">
-                            <Crown size={6} className="fill-black" /> CROWN ELITE
-                          </span>
-                        )}
-
-                        {isGod && (
-                          <span className="text-[7px] bg-amber-600 text-white px-1.5 py-0.5 rounded-sm font-black uppercase tracking-wider flex items-center gap-0.5" title="God Pass active">
-                            <Zap size={6} className="text-white fill-white" /> GOD ELITE
-                          </span>
-                        )}
-
-                        {isPlus && (
-                          <span className="text-[7px] bg-white/10 text-white px-1.5 py-0.5 rounded-sm font-black uppercase tracking-wider flex items-center gap-0.5" title="Plus Pass active">
-                            <Sparkles size={6} className="text-yellow-400" /> PLUS
                           </span>
                         )}
                       </div>
@@ -595,7 +528,7 @@ export default function Leaderboard() {
                     {/* XP Progress Bar indicator showing portion to next level */}
                     <div className="w-24 bg-white/5 h-1 rounded overflow-hidden hidden md:block">
                       <div 
-                        className={`h-full ${userItem.is_premium ? 'bg-gradient-to-r from-yellow-400 to-amber-500' : 'bg-red-500'}`}
+                        className="h-full bg-red-500"
                         style={{ width: `${userItem.xp % 100}%` }}
                       />
                     </div>

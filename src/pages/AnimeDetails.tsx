@@ -521,10 +521,10 @@ export default function AnimeDetails() {
   return (
     <div className="h-full flex flex-col min-h-screen pb-12">
       {/* Banner */}
-      <div className="h-72 relative overflow-hidden shrink-0 border-b border-[#1F1F1F]">
+      <div className="min-h-[300px] h-auto w-full relative overflow-hidden shrink-0 border-b border-[#1F1F1F]">
         <img 
           src={anime.images?.jpg?.large_image_url || undefined} 
-          className="w-full h-full object-cover blur-2xl brightness-50 opacity-35 scale-105" 
+          className="absolute inset-0 w-full h-full object-cover blur-2xl brightness-50 opacity-35 scale-105" 
           alt="Banner Blur"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-[#050505] via-[#050505]/60 to-transparent"></div>

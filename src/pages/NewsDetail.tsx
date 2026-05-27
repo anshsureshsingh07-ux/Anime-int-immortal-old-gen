@@ -3,9 +3,11 @@ import { motion } from 'motion/react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Calendar, User, Share2, Clock, ShieldCheck, Tag } from 'lucide-react';
 import { supabase } from '../lib/supabase';
+import { useNews } from '../App';
 
 export default function NewsDetail() {
   const { id } = useParams();
+  const { setActiveArticle } = useNews();
   const [article, setArticle] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeImgIndex, setActiveImgIndex] = useState(0);
@@ -85,6 +87,7 @@ export default function NewsDetail() {
     }
 
     setArticle(data);
+    setActiveArticle(data);
     setActiveImgIndex(0);
     setLoading(false);
   };
@@ -181,17 +184,19 @@ export default function NewsDetail() {
         <motion.div 
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          className="relative aspect-video rounded-[2.5rem] overflow-hidden border border-white/10 mb-20 group shadow-2xl"
+          className="relative w-full mb-20 group"
         >
           <img 
-            src={article.image || undefined} 
+            src={article.image_url || article.image || "/assets/vanguard-fallback.jpg"} 
+            referrerPolicy="no-referrer"
             alt={article.title}
-            className="w-full h-full object-cover"
+            className="w-full h-auto max-h-[450px] object-cover rounded-lg border border-white/10 shadow-2xl"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-60" />
-          <div className="absolute bottom-8 left-8 flex items-center gap-2">
+          {/* Subtle bottom shadow gradient overlay to give the text below deep contrast */}
+          <div className="absolute inset-x-0 bottom-0 h-1/4 bg-gradient-to-t from-black via-black/40 to-transparent pointer-events-none rounded-b-lg" />
+          <div className="absolute bottom-4 left-4 flex items-center gap-2">
              <div className="w-2 h-2 bg-red-600 rounded-full animate-ping" />
-             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/80">Neural Broadcast Stream Active</span>
+             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-white/95 drop-shadow-md">Neural Broadcast Stream Active</span>
           </div>
         </motion.div>
 
@@ -232,59 +237,80 @@ export default function NewsDetail() {
               ADDITIONAL SECTOR PHOTOGRAPHY ({additionalImages.length + 1} IMAGES)
             </h3>
             
-            {/* Primary Slide Display */}
-            <div className="relative aspect-video bg-zinc-950 rounded-3xl overflow-hidden border border-white/10 group shadow-2xl">
-              <img 
-                src={activeImgIndex === 0 ? article.image : additionalImages[activeImgIndex - 1]} 
-                alt={`Slide ${activeImgIndex}`} 
-                className="w-full h-full object-cover transition-all duration-500"
-              />
-              
-              {/* Navigation Arrows */}
-              <button 
-                onClick={() => setActiveImgIndex((prev) => (prev === 0 ? additionalImages.length : prev - 1))}
-                className="absolute left-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/75 border border-white/10 flex items-center justify-center text-white hover:border-[#FF0000] transition-colors focus:outline-none"
-              >
-                ‹
-              </button>
-              <button 
-                onClick={() => setActiveImgIndex((prev) => (prev === additionalImages.length ? 0 : prev + 1))}
-                className="absolute right-4 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-black/75 border border-white/10 flex items-center justify-center text-white hover:border-[#FF0000] transition-colors focus:outline-none"
-              >
-                ›
-              </button>
-              
-              {/* Index counter badge */}
-              <div className="absolute top-4 right-4 bg-black/85 px-3 py-1.5 rounded-full border border-white/10 font-mono text-[10px] text-gray-400">
-                <span className="text-white font-bold">{activeImgIndex + 1}</span> / {additionalImages.length + 1}
+            {/* Primary Slide Display inside a glassmorphism backplate card */}
+            <div 
+              style={{
+                background: 'rgba(10, 10, 16, 0.8)',
+                backdropFilter: 'blur(8px)',
+                WebkitBackdropFilter: 'blur(8px)',
+                border: '1px solid rgba(255, 255, 255, 0.05)',
+              }}
+              className="relative rounded-3xl p-6 flex flex-col items-center justify-center group shadow-2xl overflow-hidden min-h-[350px] md:min-h-[450px]"
+            >
+              {/* Centered Image Container */}
+              <div className="relative w-full max-w-2xl aspect-video rounded-2xl overflow-hidden border border-white/10 shadow-lg bg-black/60">
+                <img 
+                  src={activeImgIndex === 0 ? (article.image_url || article.image || "/assets/vanguard-fallback.jpg") : additionalImages[activeImgIndex - 1]} 
+                  referrerPolicy="no-referrer"
+                  alt={`Slide ${activeImgIndex}`} 
+                  className="w-full h-full object-cover transition-all duration-500 hover:scale-102"
+                />
+                
+                {/* Floating Neon Interactive Circles to Navigate */}
+                <button 
+                  onClick={() => setActiveImgIndex((prev) => (prev === 0 ? additionalImages.length : prev - 1))}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/85 border border-red-500/45 flex items-center justify-center text-red-500 hover:text-white hover:border-red-500 hover:bg-red-600/25 active:scale-95 transition-all duration-300 shadow-[0_0_15px_rgba(239,68,68,0.35)] hover:shadow-[0_0_25px_rgba(239,68,68,0.7)] focus:outline-none z-20 font-black text-xl"
+                  title="Previous Slide"
+                >
+                  ‹
+                </button>
+                <button 
+                  onClick={() => setActiveImgIndex((prev) => (prev === additionalImages.length ? 0 : prev + 1))}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-black/85 border border-red-500/45 flex items-center justify-center text-red-500 hover:text-white hover:border-red-500 hover:bg-red-600/25 active:scale-95 transition-all duration-300 shadow-[0_0_15px_rgba(239,68,68,0.35)] hover:shadow-[0_0_25px_rgba(239,68,68,0.7)] focus:outline-none z-20 font-black text-xl"
+                  title="Next Slide"
+                >
+                  ›
+                </button>
+                
+                {/* Index counter badge */}
+                <div className="absolute top-4 right-4 bg-black/90 px-3.5 py-1.5 rounded-full border border-red-500/30 font-mono text-[9px] text-gray-400 tracking-wider">
+                  <span className="text-red-500 font-extrabold">{activeImgIndex + 1}</span> <span className="opacity-40">/</span> {additionalImages.length + 1}
+                </div>
               </div>
             </div>
 
-            {/* Thumbnail Strip */}
-            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-red-600 scrollbar-track-zinc-900">
+            {/* Thumbnail Strip with Clean aspect-video layout & High visibility outline active indicators */}
+            <div className="flex flex-wrap items-center justify-center gap-4 pt-4 pb-2">
               {/* Slide 0 is the original main image */}
               <button 
                 onClick={() => setActiveImgIndex(0)}
-                className={`relative w-24 h-16 rounded-xl overflow-hidden border shrink-0 transition-all ${
-                  activeImgIndex === 0 ? 'border-[#FF0000] scale-105 shadow-md shadow-[#FF0000]/20' : 'border-white/10 hover:border-white/50'
+                className={`relative aspect-video h-16 w-auto rounded-xl overflow-hidden border shrink-0 transition-transform duration-300 hover:scale-105 ${
+                  activeImgIndex === 0 
+                    ? 'border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.6)] scale-105 z-10' 
+                    : 'border-white/10 hover:border-white/40'
                 }`}
               >
-                <img src={article.image} className="w-full h-full object-cover" />
-                <div className="absolute bottom-0 right-0 bg-black/85 text-[8px] font-mono px-1">MAIN</div>
+                <img src={article.image_url || article.image || "/assets/vanguard-fallback.jpg"} referrerPolicy="no-referrer" className="w-full h-full object-cover" alt="Main thumb" />
+                <div className="absolute bottom-0 inset-x-0 bg-black/75 text-[7px] font-mono py-0.5 tracking-wider text-center border-t border-white/5 uppercase">MAIN IMAGE</div>
               </button>
               
-              {additionalImages.map((img, idx) => (
-                <button 
-                  key={idx}
-                  onClick={() => setActiveImgIndex(idx + 1)}
-                  className={`relative w-24 h-16 rounded-xl overflow-hidden border shrink-0 transition-all ${
-                    activeImgIndex === idx + 1 ? 'border-[#FF0000] scale-105 shadow-md shadow-[#FF0000]/20' : 'border-white/10 hover:border-white/50'
-                  }`}
-                >
-                  <img src={img} className="w-full h-full object-cover" />
-                  <div className="absolute bottom-0 right-0 bg-black/85 text-[8px] font-mono px-1">{idx + 1}</div>
-                </button>
-              ))}
+              {additionalImages.map((img, idx) => {
+                const isActive = activeImgIndex === idx + 1;
+                return (
+                  <button 
+                    key={idx}
+                    onClick={() => setActiveImgIndex(idx + 1)}
+                    className={`relative aspect-video h-16 w-auto rounded-xl overflow-hidden border shrink-0 transition-transform duration-300 hover:scale-105 ${
+                      isActive 
+                        ? 'border-2 border-red-500 shadow-[0_0_15px_rgba(239,68,68,0.6)] scale-105 z-10' 
+                        : 'border-white/10 hover:border-white/40'
+                    }`}
+                  >
+                    <img src={img} className="w-full h-full object-cover" alt={`Thumb ${idx + 1}`} />
+                    <div className="absolute bottom-0 inset-x-0 bg-black/75 text-[7px] font-mono py-0.5 tracking-wider text-center border-t border-white/5 uppercase">PHOTO {idx + 1}</div>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}

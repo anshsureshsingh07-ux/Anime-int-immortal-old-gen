@@ -406,11 +406,11 @@ export default function AuthPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] flex items-center justify-center p-4">
+    <div className="min-h-screen bg-[var(--faction-bg,#050505)] flex items-center justify-center p-4 transition-all duration-700 ease-in-out">
       {/* Background accents */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#FF0000]/10 rounded-full blur-[120px]" />
-        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#800000]/10 rounded-full blur-[120px]" />
+        <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] rounded-full blur-[120px] transition-all duration-700" style={{ backgroundColor: 'var(--faction-primary-glow, rgba(255, 0, 0, 0.15))' }} />
+        <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] rounded-full blur-[120px] transition-all duration-700" style={{ backgroundColor: 'var(--faction-primary-glow, rgba(255, 0, 0, 0.15))' }} />
       </div>
 
       {/* Invisible Captcha Anchor */}
@@ -422,11 +422,11 @@ export default function AuthPage() {
         className="w-full max-w-md z-10"
       >
         <div className="text-center mb-8">
-          <div className="inline-flex w-12 h-12 bg-gradient-to-br from-[#FF0000] to-[#800000] rounded-sm rotate-45 items-center justify-center mb-6 mx-auto">
+          <div className="inline-flex w-12 h-12 bg-gradient-to-br from-[var(--faction-primary,#FF0000)] to-[var(--faction-primary-glow,#800000)] rounded-sm rotate-45 items-center justify-center mb-6 mx-auto shadow-[0_0_20px_var(--faction-primary-glow)]">
             <div className="w-4 h-4 bg-white rounded-full animate-pulse"></div>
           </div>
           <h1 className="text-3xl font-black tracking-tighter text-white uppercase italic">
-            Nexus <span className="text-[#FF0000]">Secure</span>
+            Nexus <span className="text-[var(--faction-primary,#FF0000)]">Secure</span>
           </h1>
           <p className="text-gray-500 text-xs font-mono mt-2 uppercase tracking-widest">
             {activeTab === 'email' && mode === 'signin' && 'Access the Mainframe'}
@@ -437,12 +437,12 @@ export default function AuthPage() {
           </p>
         </div>
 
-        <div className="bg-[#0A0A0A] border border-[#1F1F1F] p-8 rounded-sm shadow-2xl relative">
+        <div className="bg-[var(--faction-panel-bg,#0A0A0A)] border border-[var(--faction-border,#1F1F1F)] p-8 rounded-sm shadow-2xl relative">
           {/* Decorative Corner */}
-          <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-[#FF0000]/20 pointer-events-none"></div>
+          <div className="absolute top-0 right-0 w-8 h-8 border-t-2 border-r-2 border-[var(--faction-primary,#FF0000)]/20 pointer-events-none"></div>
 
           {/* Sleek Terminal Tab Indicators */}
-          <div className="grid grid-cols-3 gap-1.5 p-1 bg-[#121212] border border-[#1e1e1e] rounded mb-6 select-none">
+          <div className="grid grid-cols-3 gap-1.5 p-1 bg-black/60 border border-[var(--faction-border,#1e1e1e)] rounded mb-6 select-none">
             <button
               type="button"
               onClick={() => {
@@ -450,9 +450,9 @@ export default function AuthPage() {
                 setError(null);
                 setMessage(null);
               }}
-              className={`py-1.5 text-[9px] font-black uppercase tracking-wider rounded transition-all transition-all ${
+              className={`py-1.5 text-[9px] font-black uppercase tracking-wider rounded transition-all ${
                 activeTab === 'email'
-                  ? 'bg-gradient-to-r from-red-600 to-red-900 text-white font-extrabold shadow-sm'
+                  ? 'bg-[var(--faction-primary,#E50914)] text-white font-extrabold shadow-sm'
                   : 'text-zinc-500 hover:text-zinc-350 bg-transparent'
               }`}
             >
@@ -467,7 +467,7 @@ export default function AuthPage() {
               }}
               className={`py-1.5 text-[9px] font-black uppercase tracking-wider rounded transition-all ${
                 activeTab === 'mobile'
-                  ? 'bg-gradient-to-r from-red-600 to-red-900 text-white font-extrabold shadow-sm'
+                  ? 'bg-[var(--faction-primary,#E50914)] text-white font-extrabold shadow-sm'
                   : 'text-zinc-500 hover:text-zinc-350 bg-transparent'
               }`}
             >
@@ -482,7 +482,7 @@ export default function AuthPage() {
               }}
               className={`py-1.5 text-[9px] font-black uppercase tracking-wider rounded transition-all ${
                 activeTab === 'google'
-                  ? 'bg-gradient-to-r from-red-600 to-red-900 text-white font-extrabold shadow-sm'
+                  ? 'bg-[var(--faction-primary,#E50914)] text-white font-extrabold shadow-sm'
                   : 'text-zinc-500 hover:text-zinc-350 bg-transparent'
               }`}
             >

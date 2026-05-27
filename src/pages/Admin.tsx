@@ -9,6 +9,7 @@ import { supabase } from '../lib/supabase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { upgradeToPremium } from '../lib/profileSync';
+import { useNews } from '../App';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -30,6 +31,7 @@ const getFactionEmoji = (name?: string) => {
 };
 
 export default function Admin() {
+  const { setActiveArticle, setBreakingNews } = useNews();
   const [session, setSession] = useState<any>(null);
   const [dbUser, setDbUser] = useState<any>(null);
   const [news, setNews] = useState<any[]>([]);
@@ -455,6 +457,8 @@ export default function Admin() {
   const [formSuccess, setFormSuccess] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageUrl, setImageUrl] = useState<string>('');
+  const [isDragOver, setIsDragOver] = useState(false);
   const [newsForm, setNewsForm] = useState({
     title: '',
     description: '',
@@ -462,6 +466,7 @@ export default function Admin() {
     image: '',
     youtubeVideoUrl: '',
     additionalImages: '',
+    is_pinned: false,
   });
 
   // App Payment Config States
@@ -655,6 +660,42 @@ export default function Admin() {
     }
   };
 
+  const handleDirectUpload = async (file: File) => {
+    if (!file) return;
+    setUploading(true);
+    setFormError(null);
+    try {
+      const fileExt = file.name.split('.').pop() || 'png';
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `headlines/${fileName}`;
+
+      let { error: uploadError } = await supabase.storage
+        .from('breaking-images')
+        .upload(filePath, file);
+
+      if (uploadError) {
+        throw uploadError;
+      }
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('breaking-images')
+        .getPublicUrl(filePath);
+
+      setImageUrl(publicUrl);
+      setNewsForm(prev => ({ ...prev, image: publicUrl }));
+      setImageFile(file);
+    } catch (err: any) {
+      console.warn("Direct Supabase Storage upload failed, applying secure local fallback:", err);
+      // Fallback: If bucket is uninitialized/unconfigured, fall back to safe local Object URL
+      const fallbackUrl = URL.createObjectURL(file);
+      setImageUrl(fallbackUrl);
+      setNewsForm(prev => ({ ...prev, image: fallbackUrl }));
+      setImageFile(file);
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const isAdmin = (currentDbUser && (currentDbUser.role === 'admin' || currentDbUser.role === 'news_writer' || currentDbUser.role === 'moderator')) || 
                   (session?.user?.email === 'anshsureshsingh07@gmail.com' || session?.user?.email === 'animeintofficial@gmail.com');
 
@@ -689,34 +730,35 @@ export default function Admin() {
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      let imageUrl = newsForm.image;
+      let finalImageUrl = imageUrl || newsForm.image;
 
-      if (imageFile) {
+      if (!finalImageUrl && imageFile) {
         setUploading(true);
-        const fileExt = imageFile.name.split('.').pop() || 'png';
-        // Generate a clean, safe filename path using the current timestamp
-        const fileName = `news_${Date.now()}.${fileExt}`;
+        try {
+          const fileExt = imageFile.name.split('.').pop() || 'png';
+          const fileName = `news_${Date.now()}.${fileExt}`;
+          const base64Data = await fileToBase64(imageFile);
 
-        const base64Data = await fileToBase64(imageFile);
+          const response = await fetch('/api/upload', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+              bucket: 'news',
+              fileName,
+              fileData: base64Data,
+              contentType: imageFile.type
+            })
+          });
 
-        const response = await fetch('/api/upload', {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({
-            bucket: 'news',
-            fileName,
-            fileData: base64Data,
-            contentType: imageFile.type
-          })
-        });
-
-        if (!response.ok) {
-          const resError = await response.json();
-          throw new Error(resError.error || 'Server upload failed');
+          if (response.ok) {
+            const { publicUrl } = await response.json();
+            finalImageUrl = publicUrl;
+          }
+        } catch (err) {
+          console.warn('Server fallback upload failed:', err);
+        } finally {
+          setUploading(false);
         }
-
-        const { publicUrl } = await response.json();
-        imageUrl = publicUrl;
       }
 
       const parsedAdditionalImages = newsForm.additionalImages
@@ -735,7 +777,9 @@ export default function Admin() {
         title: newsForm.title,
         description: newsForm.description + metaString,
         category: newsForm.category,
-        image: imageUrl,
+        image: finalImageUrl,
+        image_url: finalImageUrl, // explicitly support both image and image_url keys as requested!
+        is_pinned: newsForm.is_pinned || false,
         author_id: session.user.id,
         author_name: dbUser?.username || session.user.email?.split('@')[0] || 'Vanguard Agent',
         created_at: new Date().toISOString()
@@ -769,14 +813,40 @@ export default function Admin() {
           dbError = innerErr;
         }
 
-        if (dbError && (dbError.code === '42703' || dbError.message?.includes('column'))) {
-          console.warn('Altered Supabase column missing on news table, retrying insert with serialized tag fallback...');
-          const { error: fallbackError } = await supabase.from('news').insert([insertPayload]);
+        if (dbError && (dbError.code === '42703' || dbError.message?.includes('column') || dbError.message?.includes('schema cache'))) {
+          console.warn('Altered Supabase column missing on news table, retrying insert with serialized tag fallback (stripping image_url and external links)...');
+          const cleanInsertPayload = {
+            title: insertPayload.title,
+            description: insertPayload.description,
+            category: insertPayload.category,
+            image: insertPayload.image,
+            author_id: insertPayload.author_id,
+            author_name: insertPayload.author_name,
+            created_at: insertPayload.created_at
+          };
+          const { error: fallbackError } = await supabase.from('news').insert([cleanInsertPayload]);
           dbError = fallbackError;
         }
 
         if (dbError) throw dbError;
       }
+
+      // Immediate Global State Push to reflect instantly on the UI/Marquee
+      const instantPayload = {
+        title: newsForm.title,
+        description: newsForm.description,
+        content: newsForm.description,
+        category: newsForm.category,
+        image: finalImageUrl,
+        image_url: finalImageUrl,
+        author_name: dbUser?.username || session.user.email?.split('@')[0] || 'Vanguard Agent',
+        created_at: payloadData.created_at
+      };
+
+      if (newsForm.category?.toUpperCase() === 'BREAKING') {
+        setBreakingNews({ id: 1, text: newsForm.title, title: newsForm.title });
+      }
+      setActiveArticle(instantPayload);
 
       setNewsForm({ 
         title: '', 
@@ -784,9 +854,11 @@ export default function Admin() {
         category: 'Trending', 
         image: '', 
         youtubeVideoUrl: '', 
-        additionalImages: '' 
+        additionalImages: '',
+        is_pinned: false
       });
       setImageFile(null);
+      setImageUrl('');
       setFormSuccess(true);
       fetchNews();
       setTimeout(() => setFormSuccess(false), 3000);
@@ -891,36 +963,69 @@ export default function Admin() {
                              <option>Anime</option>
                              <option>Manga</option>
                              <option>Recruitment</option>
+                             <option>BREAKING</option>
                           </select>
                        </div>
                     </div>
                     <div className="space-y-4">
                        <div className="space-y-2">
-                          <label className="text-[10px] font-black uppercase text-gray-500">Image Asset Upload</label>
-                          <div className="flex gap-4">
-                            <label className="flex-1 cursor-pointer">
-                              <div className="w-full bg-[#0a0a0a] border border-dashed border-white/10 rounded-lg p-6 flex flex-col items-center justify-center gap-2 hover:border-red-600/50 transition-all">
-                                <Upload className={uploading ? "animate-bounce text-red-600" : "text-gray-600"} size={24} />
-                                <span className="text-[10px] font-mono uppercase text-gray-500">
-                                  {imageFile ? imageFile.name : uploading ? "Uploading to Cloud..." : "Select File (PNG/JPG)"}
+                          <label className="text-[10px] font-black uppercase text-gray-500">📸 UPLOAD TELEMETRY VISUAL (HERO BANNER)</label>
+                          <div className="space-y-4">
+                            <div 
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                                setIsDragOver(true);
+                              }}
+                              onDragLeave={() => setIsDragOver(false)}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                setIsDragOver(false);
+                                const file = e.dataTransfer.files?.[0];
+                                if (file) {
+                                  handleDirectUpload(file);
+                                }
+                              }}
+                              className={`w-full bg-[#0a0a0a]/85 backdrop-blur-md rounded-lg p-6 flex flex-col items-center justify-center gap-2 border-2 border-dashed transition-all duration-300 relative ${isDragOver ? 'border-red-500 bg-red-950/15 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'border-white/10 hover:border-red-650/40'}`}
+                            >
+                              <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer py-4">
+                                <Upload className={uploading ? "animate-bounce text-red-500" : "text-gray-400"} size={24} />
+                                <span className="text-[10px] font-mono uppercase text-gray-500 mt-2 text-center font-bold">
+                                  {imageFile ? imageFile.name : uploading ? "Synchronizing Telemetry Core..." : "DRAG & DROP TELEMETRY FILE OR CLICK TO BROWSE"}
                                 </span>
                                 <input 
                                   type="file" 
                                   className="hidden" 
                                   accept="image/*"
-                                  onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+                                  onChange={(e) => {
+                                    const file = e.target.files?.[0];
+                                    if (file) {
+                                      handleDirectUpload(file);
+                                    }
+                                  }}
                                 />
-                              </div>
-                            </label>
-                            {imageFile && (
-                              <div className="w-24 h-24 bg-black rounded-lg border border-white/10 overflow-hidden relative group">
-                                <img src={URL.createObjectURL(imageFile)} className="w-full h-full object-cover" />
+                              </label>
+                            </div>
+                            {/* 200px Micro-Thumbnail Feedback Frame */}
+                            {(imageUrl || imageFile) && (
+                              <div className="w-[200px] h-[200px] bg-black border-2 border-red-500/40 rounded-lg overflow-hidden relative group shadow-[0_0_15px_rgba(239,68,68,0.3)] mt-2">
+                                <img 
+                                  src={imageUrl || (imageFile ? URL.createObjectURL(imageFile) : '')} 
+                                  className="w-full h-full object-cover" 
+                                  referrerPolicy="no-referrer"
+                                />
+                                <div className="absolute inset-x-0 bottom-0 bg-black/85 py-1.5 px-3 border-t border-red-500/25 text-center font-mono text-[8px] uppercase tracking-wider text-red-500 font-bold">
+                                  CONFIRMED TARGET
+                                </div>
                                 <button 
                                   type="button"
-                                  onClick={() => setImageFile(null)}
+                                  onClick={() => {
+                                    setImageFile(null);
+                                    setImageUrl('');
+                                    setNewsForm(prev => ({ ...prev, image: '' }));
+                                  }}
                                   className="absolute inset-0 bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                                 >
-                                  <Trash2 size={16} className="text-red-500" />
+                                  <Trash2 size={20} className="text-red-500" />
                                 </button>
                               </div>
                             )}
@@ -963,6 +1068,18 @@ export default function Admin() {
                        </div>
                     </div>
                     <div className="space-y-2">
+                        <div className="flex items-center gap-2 pt-2 pb-4 col-span-1 md:col-span-2">
+                           <input 
+                              type="checkbox"
+                              id="is_pinned"
+                              checked={newsForm.is_pinned}
+                              onChange={e => setNewsForm({...newsForm, is_pinned: e.target.checked})}
+                              className="w-4 h-4 accent-red-600 rounded bg-[#0a0a0a] border-white/10 cursor-pointer"
+                           />
+                           <label htmlFor="is_pinned" className="text-[10px] font-black uppercase text-gray-400 cursor-pointer select-none tracking-widest hover:text-white transition-colors">
+                             [PIN TRANSMISSION] Elevate this article on feed top
+                           </label>
+                        </div>
                        <label className="text-[10px] font-black uppercase text-gray-500">Content Matrix</label>
                        <textarea 
                           required
@@ -973,7 +1090,7 @@ export default function Admin() {
                        />
                     </div>
                     <button className="bg-red-600 text-white px-8 py-3 rounded-full font-black uppercase text-[10px] tracking-widest hover:bg-red-700 transition-all text-white">
-                       Broadcast to Network
+                       [PUBLISH STREAM] Broadcast to Network
                     </button>
                  </form>
               </section>

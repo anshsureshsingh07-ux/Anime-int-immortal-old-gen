@@ -6,6 +6,7 @@ import { supabase } from '../lib/supabase';
 import { auth } from '../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { FALLBACK_AIRING } from '../lib/jikanFallback';
+import { useNews } from '../App';
 
 export default function Home() {
   const [news, setNews] = useState<any[]>([]);
@@ -17,10 +18,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   // New robust states for the dynamic features
-  const [breakingNews, setBreakingNews] = useState<any>({
-    id: 1,
-    text: "Vanguard Ops: Archives System Expansion Initialized"
-  });
+  const { breakingNews, setBreakingNews } = useNews();
   const [isEditingBreaking, setIsEditingBreaking] = useState(false);
   const [tempBreakingText, setTempBreakingText] = useState('');
 
@@ -57,13 +55,29 @@ export default function Home() {
 
     const fetchData = async () => {
       // News
-      const twentyEightHoursAgo = new Date(Date.now() - 28 * 60 * 60 * 1000).toISOString();
-      const { data: newsData } = await supabase
-        .from('news')
-        .select('*')
-        .gte('created_at', twentyEightHoursAgo)
-        .order('created_at', { ascending: false })
-        .limit(6);
+      let newsQuery;
+      try {
+        newsQuery = await supabase
+          .from('news')
+          .select('*')
+          .order('is_pinned', { ascending: false })
+          .order('created_at', { ascending: false });
+        
+        if (newsQuery.error) {
+          console.warn('News query with is_pinned ordering failed, retrying with basic order:', newsQuery.error.message);
+          newsQuery = await supabase
+            .from('news')
+            .select('*')
+            .order('created_at', { ascending: false });
+        }
+      } catch (err: any) {
+        console.warn('News query exception, trying standard fallback:', err?.message);
+        newsQuery = await supabase
+          .from('news')
+          .select('*')
+          .order('created_at', { ascending: false });
+      }
+      const newsData = newsQuery?.data || null;
       
       // Releases
       const { data: releaseData } = await supabase
@@ -296,6 +310,9 @@ export default function Home() {
     return str;
   };
 
+  const latestBreakingNews = news?.find(item => item.category?.toUpperCase() === 'BREAKING') || news?.[0];
+  const heroImage = latestBreakingNews?.image_url || latestBreakingNews?.image || "/assets/vanguard-fallback.jpg";
+
   return (
     <div className="p-0">
       {/* Top Release Tracker (Marquee) */}
@@ -329,9 +346,16 @@ export default function Home() {
           <div className="relative h-80 w-full rounded-xl overflow-hidden group border border-[#1F1F1F]">
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent z-10"></div>
             <img 
-              src="https://images.unsplash.com/photo-1541562232579-512a21360020?auto=format&fit=crop&q=80&w=2670" 
+              src={heroImage} 
               alt="Featured" 
-              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-1000 brightness-75"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement;
+                if (target.src !== "https://images.unsplash.com/photo-1541562232579-512a21360020?auto=format&fit=crop&q=80&w=2670") {
+                  target.src = "https://images.unsplash.com/photo-1541562232579-512a21360020?auto=format&fit=crop&q=80&w=2670";
+                }
+              }}
+              className="w-full h-full object-cover transition-opacity duration-300 group-hover:scale-105 transition-all duration-1000 brightness-75"
+              referrerPolicy="no-referrer"
             />
             <div className="absolute top-6 left-6 z-20 flex gap-2">
               <span className="text-white text-[10px] font-black px-2 py-1 uppercase rounded" style={{ backgroundColor: 'var(--faction-primary)' }}>Breaking</span>
@@ -367,7 +391,7 @@ export default function Home() {
               ) : (
                 <div className="group/banner flex items-start justify-between gap-4">
                   <h2 className="text-3xl font-black text-white leading-tight uppercase italic drop-shadow-lg leading-snug">
-                    {breakingNews?.text || breakingNews?.title || "Vanguard Ops: Archives System Expansion Initialized"}
+                    {latestBreakingNews?.title || breakingNews?.text || breakingNews?.title || "Vanguard Ops: Archives System Expansion Initialized"}
                   </h2>
                   {isCurrentUserAdmin && (
                     <button
@@ -415,7 +439,11 @@ export default function Home() {
                 >
                   <Link to={`/news/${item.id}`} className="absolute inset-0 z-10" aria-label={`View ${item.title}`} />
                   <div className="h-40 w-full bg-[#1A1A1A] rounded-lg overflow-hidden mb-3 relative">
-                     <img src={item.image || undefined} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                     <img 
+                       src={item.image_url || item.image || "/assets/vanguard-fallback.jpg"} 
+                       referrerPolicy="no-referrer"
+                       className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" 
+                     />
                      <div className="absolute top-2 left-2">
                        <span className="text-[8px] font-black text-white px-2 py-1 rounded uppercase tracking-widest shadow-2xl bg-faction-primary">
                          {item.category}

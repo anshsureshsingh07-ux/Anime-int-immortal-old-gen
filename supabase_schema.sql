@@ -167,8 +167,12 @@ INSERT INTO storage.buckets (id, name, public)
 VALUES ('profile photo', 'profile photo', true)
 ON CONFLICT (id) DO NOTHING;
 
+INSERT INTO storage.buckets (id, name, public) 
+VALUES ('avatar', 'avatar', true)
+ON CONFLICT (id) DO NOTHING;
+
 -- Storage Policies (Universal helper for public buckets)
-CREATE POLICY "Public Access" ON storage.objects FOR SELECT USING (bucket_id IN ('news', 'avatars', 'profile photo'));
+CREATE POLICY "Public Access" ON storage.objects FOR SELECT USING (bucket_id IN ('news', 'avatars', 'profile photo', 'avatar'));
 
 CREATE POLICY "Admin/Writer Storage Access" ON storage.objects FOR ALL 
   TO authenticated
@@ -177,6 +181,35 @@ CREATE POLICY "Admin/Writer Storage Access" ON storage.objects FOR ALL
     OR (bucket_id = 'avatars' AND auth.uid() = (storage.foldername(name))[1]::uuid)
     OR (bucket_id = 'avatars' AND EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'))
   );
+
+CREATE POLICY "Avatar Owner Storage Access" ON storage.objects FOR ALL
+  TO authenticated
+  USING (
+    (bucket_id = 'avatar' AND (
+      name = 'profiles/' || auth.uid()::text || '.png'
+      OR name = 'profiles/' || auth.uid()::text || '.jpg'
+      OR name = 'profiles/' || auth.uid()::text || '.jpeg'
+      OR name = 'profiles/' || auth.uid()::text || '.gif'
+      OR name = 'profiles/' || auth.uid()::text || '.webp'
+      OR (storage.foldername(name))[1] = auth.uid()::text
+      OR EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')
+    ))
+  )
+  WITH CHECK (
+    (bucket_id = 'avatar' AND (
+      name = 'profiles/' || auth.uid()::text || '.png'
+      OR name = 'profiles/' || auth.uid()::text || '.jpg'
+      OR name = 'profiles/' || auth.uid()::text || '.jpeg'
+      OR name = 'profiles/' || auth.uid()::text || '.gif'
+      OR name = 'profiles/' || auth.uid()::text || '.webp'
+      OR (storage.foldername(name))[1] = auth.uid()::text
+      OR EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin')
+    ))
+  );
+
+CREATE POLICY "Public Avatar Upload" ON storage.objects FOR ALL
+  USING (bucket_id = 'avatar')
+  WITH CHECK (bucket_id = 'avatar');
 
 CREATE POLICY "Profile Photo Owner Storage Access" ON storage.objects FOR ALL
   TO authenticated

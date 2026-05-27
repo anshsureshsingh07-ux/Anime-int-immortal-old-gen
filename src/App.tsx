@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, createContext, useContext } from 'react';
 import { 
   BrowserRouter as Router, 
   Routes, 
@@ -27,7 +27,8 @@ import {
   Check,
   Copy,
   ArrowLeft,
-  Upload
+  Upload,
+  Landmark
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
@@ -202,6 +203,193 @@ const getFactionStyleCSS = (factionName?: string, isSummerActive?: boolean) => {
         border-color: #F59E0B !important;
       }
     `;
+  } else if (name.includes('baratheon')) {
+    primary = '#FFB300';
+    primaryGlow = 'rgba(255, 179, 0, 0.45)';
+    bg = '#0F0C05';
+    panelBg = '#191407';
+    border = '#FFB300';
+    extraStyles = `
+      body, #root, .flex.h-screen {
+        background-color: #0F0C05 !important;
+      }
+      ::-webkit-scrollbar-thumb, .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #FFB300 !important;
+      }
+      * {
+        scrollbar-color: #FFB300 #191407 !important;
+      }
+      /* heavy royal double borders and gold glows */
+      aside, .cyber-card, .faction-themed-panel {
+        background-color: #191407 !important;
+        border: 2px double #FFB300 !important;
+        box-shadow: 0 0 20px rgba(255, 179, 0, 0.25) !important;
+      }
+      .text-white {
+        color: #FFE699 !important;
+        text-shadow: 0 0 8px rgba(255, 179, 0, 0.35) !important;
+      }
+      .faction-box-glow, button:focus, .card-glow {
+        box-shadow: 0 0 20px rgba(255, 179, 0, 0.4) !important;
+      }
+    `;
+  } else if (name.includes('targaryen')) {
+    primary = '#E50914';
+    primaryGlow = 'rgba(229, 9, 20, 0.55)';
+    bg = '#141414';
+    panelBg = '#1C1C1C';
+    border = '#E50914';
+    extraStyles = `
+      body, #root, .flex.h-screen {
+        background-color: #141414 !important;
+      }
+      ::-webkit-scrollbar-thumb, .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #E50914 !important;
+      }
+      * {
+        scrollbar-color: #E50914 #1C1C1C !important;
+      }
+      /* matte charcoal, piercing red glows, red trim */
+      aside, .cyber-card, .faction-[#0A0A0A], .faction-themed-panel {
+        background-color: #1A1A1A !important;
+        border-color: rgba(229, 9, 20, 0.35) !important;
+      }
+      .faction-box-glow, button:focus, .card-glow {
+        box-shadow: 0 0 25px rgba(229, 9, 20, 0.5) !important;
+      }
+      h1, h2, h3, .title-text {
+        text-shadow: 0 0 8px rgba(229, 9, 20, 0.6) !important;
+      }
+    `;
+  } else if (name.includes('uzumaki')) {
+    primary = '#FF6600';
+    primaryGlow = 'rgba(255, 102, 0, 0.5)';
+    bg = '#120A05';
+    panelBg = '#1F1109';
+    border = '#FF6600';
+    extraStyles = `
+      body, #root, .flex.h-screen {
+        background-color: #120A05 !important;
+      }
+      ::-webkit-scrollbar-thumb, .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #FF6600 !important;
+      }
+      * {
+        scrollbar-color: #FF6600 #1F1109 !important;
+      }
+      /* neon orange highlights & scroll-like elegant borders */
+      aside, .cyber-card, .faction-themed-panel {
+        background-color: #1c1008 !important;
+        border: 1px solid #FF6600 !important;
+        border-radius: 8px !important;
+      }
+      .faction-box-glow, button:focus, .card-glow {
+        box-shadow: 0 0 18px rgba(255, 102, 0, 0.45) !important;
+      }
+    `;
+  } else if (name.includes('japanese')) {
+    primary = '#ff5e7e';
+    primaryGlow = 'rgba(255, 94, 126, 0.5)';
+    bg = '#1c080e';
+    panelBg = '#260b13';
+    border = '#ff5e7e';
+    extraStyles = `
+      body, #root, .flex.h-screen {
+        background-color: #1c080e !important;
+      }
+      ::-webkit-scrollbar-thumb, .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #ff5e7e !important;
+      }
+      * {
+        scrollbar-color: #ff5e7e #260b13 !important;
+      }
+      /* Sakura and scroll-themed backgrounds */
+      aside, .cyber-card, .faction-themed-panel {
+        background-color: #260b13 !important;
+        border-color: #ff5e7e !important;
+      }
+      .faction-box-glow, button:focus, .card-glow {
+        box-shadow: 0 0 18px rgba(255, 94, 126, 0.45) !important;
+      }
+    `;
+  } else if (name.includes('uchiha')) {
+    primary = '#ff003c';
+    primaryGlow = 'rgba(255, 0, 60, 0.6)';
+    bg = '#000000';
+    panelBg = '#0c0103';
+    border = '#ff003c';
+    extraStyles = `
+      body, #root, .flex.h-screen {
+        background-color: #000000 !important;
+      }
+      ::-webkit-scrollbar-thumb, .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #ff003c !important;
+      }
+      * {
+        scrollbar-color: #ff003c #0c0103 !important;
+      }
+      /* absolute black panels, sharingan pulsing */
+      aside, .cyber-card, .faction-themed-panel {
+        background-color: #050001 !important;
+        border-color: rgba(255, 0, 60, 0.3) !important;
+        box-shadow: 0 0 12px rgba(255, 0, 60, 0.15) !important;
+      }
+      @keyframes sharingan-pulse {
+        0%, 100% { box-shadow: 0 0 8px rgba(255, 0, 60, 0.15); border-color: rgba(255,0,60,0.3); }
+        50% { box-shadow: 0 0 22px rgba(255, 0, 60, 0.55); border-color: rgba(255,0,60,0.7); }
+      }
+      aside, .cyber-card, .faction-themed-panel {
+        animation: sharingan-pulse 4s infinite ease-in-out !important;
+      }
+    `;
+  } else if (name.includes('ackerman')) {
+    primary = '#4a90e2';
+    primaryGlow = 'rgba(74, 144, 226, 0.45)';
+    bg = '#1e222b';
+    panelBg = '#252a36';
+    border = '#4a90e2';
+    extraStyles = `
+      body, #root, .flex.h-screen {
+        background-color: #1e222b !important;
+      }
+      ::-webkit-scrollbar-thumb, .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #4a90e2 !important;
+      }
+      * {
+        scrollbar-color: #4a90e2 #252a36 !important;
+      }
+      /* tactical slate gray, steel-blue lines */
+      aside, .cyber-card, .faction-themed-panel {
+        background-color: #252a36 !important;
+        border: 1px solid #3b485d !important;
+      }
+    `;
+  } else if (name.includes('saiyan')) {
+    primary = '#ffd700';
+    primaryGlow = 'rgba(255, 215, 0, 0.5)';
+    bg = '#090e1f';
+    panelBg = '#121b3a';
+    border = '#00bfff';
+    extraStyles = `
+      body, #root, .flex.h-screen {
+        background-color: #090e1f !important;
+      }
+      ::-webkit-scrollbar-thumb, .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #ffd700 !important;
+      }
+      * {
+        scrollbar-color: #ffd700 #121b3a !important;
+      }
+      /* dark cosmic navy backdrop, aura gold titles, electric blue accents */
+      aside, .cyber-card, .faction-themed-panel {
+        background-color: #0e1630 !important;
+        border: 1.5px solid #00bfff !important;
+        box-shadow: 0 0 15px rgba(0, 191, 255, 0.15) !important;
+      }
+      h1, h2, h3, .title-text {
+        text-shadow: 0 0 12px rgba(255, 215, 0, 0.6) !important;
+      }
+    `;
   }
 
   return `
@@ -243,6 +431,8 @@ const getFactionStyleCSS = (factionName?: string, isSummerActive?: boolean) => {
     .shadow-faction-glow {
       box-shadow: 0 0 12px var(--faction-primary-glow) !important;
     }
+
+    ${extraStyles}
   `;
 };
 import AnimeDatabase from './pages/Database';
@@ -255,7 +445,30 @@ import News from './pages/News';
 import Profile from './pages/Profile';
 import NewsDetail from './pages/NewsDetail';
 import LegalPage from './pages/Legal';
+import HouseCards from './pages/HouseCards';
 import SolarFlareOverlay from './components/SolarFlareOverlay';
+
+export interface NewsContextType {
+  activeArticle: any | null;
+  setActiveArticle: (article: any | null) => void;
+  breakingNews: any;
+  setBreakingNews: (news: any) => void;
+}
+
+export const NewsContext = createContext<NewsContextType | undefined>(undefined);
+
+export function useNews() {
+  const context = useContext(NewsContext);
+  if (!context) {
+    return {
+      activeArticle: null,
+      setActiveArticle: () => {},
+      breakingNews: { id: 1, text: "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED" },
+      setBreakingNews: () => {}
+    };
+  }
+  return context;
+}
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -263,10 +476,63 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const isActualAdmin = firebaseUser && firebaseUser.email === 'anshsureshsingh07@gmail.com';
   const [supabaseSession, setSupabaseSession] = useState<any>(null);
   const [dbUser, setDbUser] = useState<any>(null);
-  const [currentUserFaction, setCurrentUserFaction] = useState<any>(null);
+  const [headerLocalBlob, setHeaderLocalBlob] = useState<string>('');
+  const [currentUserFaction, setCurrentUserFaction] = useState<any>(() => {
+    const cachedName = localStorage.getItem('active_faction_name');
+    return cachedName ? { faction_name: cachedName, faction_rank: 'Legionnaire', faction_xp: 100 } : null;
+  });
   const [isStarkSummer, setIsStarkSummer] = useState(() => localStorage.getItem('stark_summer_active') === 'true');
   const [loadingAuth, setLoadingAuth] = useState(true);
   const location = useLocation();
+
+  // News global states
+  const [activeArticle, setActiveArticle] = useState<any | null>(null);
+  const [breakingNews, setBreakingNews] = useState<any>({
+    id: 1,
+    text: "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED"
+  });
+
+  // Automatically fetch breaking news globally
+  useEffect(() => {
+    let isMounted = true;
+    const fetchBreaking = async () => {
+      try {
+        const { data: bnData } = await supabase
+          .from('breaking_news')
+          .select('*')
+          .eq('id', 1)
+          .maybeSingle();
+        if (bnData && isMounted) {
+          setBreakingNews(bnData);
+        } else if (!bnData && isMounted) {
+          const defaultBN = { id: 1, text: "Vanguard Ops: Archives System Expansion Initialized" };
+          const { data: insertedBN } = await supabase.from('breaking_news').insert([defaultBN]).select().single();
+          if (insertedBN && isMounted) {
+            setBreakingNews(insertedBN);
+          }
+        }
+      } catch (err) {
+        console.warn('Unable to query breaking_news globally:', err);
+      }
+    };
+    fetchBreaking();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const clearActiveArticle = () => {
+    setActiveArticle(null);
+  };
+
+  // Clear active article context when navigating away from news details
+  useEffect(() => {
+    // Automatically check if we are on an explicit article view route
+    // If not, instantly flush the context back to the active breaking news or main fallback text
+    if (!location.pathname.includes('/news/')) {
+      clearActiveArticle(); 
+    }
+  }, [location.pathname]);
 
   useEffect(() => {
     const handleSummerChange = (e: any) => {
@@ -300,14 +566,17 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   const fetchLocalUserFaction = async (userId: string) => {
-    // Explicitly use the active node id string 'CUR5UOUETKOEGWTPETV6COCNWG13' as modern alphanumeric format
-    const validUserId = 'CUR5UOUETKOEGWTPETV6COCNWG13';
+    const activeUserId = userId || firebaseUser?.uid || auth.currentUser?.uid;
+    if (!activeUserId) {
+      setCurrentUserFaction(null);
+      return;
+    }
 
     try {
       const { data } = await supabase
         .from('user_factions')
         .select('*')
-        .eq('user_id', validUserId)
+        .eq('user_id', activeUserId)
         .maybeSingle();
       if (data) {
         setCurrentUserFaction(data);
@@ -377,6 +646,22 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       setFirebaseUser(user);
       setLoadingAuth(false);
       if (user?.uid) {
+        // Hydrate from localStorage immediately to prevent flicker
+        const cached = localStorage.getItem('cached_avatar_url_' + user.uid) || localStorage.getItem('cached_avatar_url_' + user.uid);
+        if (cached) {
+          setDbUser((prev: any) => {
+            if (prev) {
+              return { ...prev, avatar_url: cached, profile_photo_url: cached };
+            }
+            return { 
+              id: user.uid, 
+              email: user.email, 
+              username: user.email?.split('@')[0] || '', 
+              avatar_url: cached, 
+              profile_photo_url: cached 
+            };
+          });
+        }
         fetchProfileById(user.uid);
         registerPushNotifications(user.uid).catch((err) => {
           console.warn('Error self-registering push notifications:', err);
@@ -410,8 +695,11 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const handleProfileUpdate = () => {
-      fetchLocalUserFaction('CUR5UOUETKOEGWTPETV6COCNWG13');
+    const handleProfileUpdate = (e: any) => {
+      fetchLocalUserFaction(firebaseUser?.uid || '');
+      if (e?.detail?.blobUrl) {
+        setHeaderLocalBlob(e.detail.blobUrl);
+      }
       if (firebaseUser?.uid) {
         fetchProfileById(firebaseUser.uid);
       } else if (firebaseUser?.email) {
@@ -434,6 +722,24 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     } catch (e) {
       console.warn('Failed to get session in fetchProfileById:', e);
     }
+
+    // Query user_profiles database table first to pull avatar_public_url for persistence
+    let userProfilesAvatar: string | null = null;
+    try {
+      const { data: upData } = await supabase
+        .from('user_profiles')
+        .select('avatar_public_url')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (upData?.avatar_public_url) {
+        userProfilesAvatar = upData.avatar_public_url;
+      }
+    } catch (upErr) {
+      console.warn('user_profiles retrieval by ID in App bypassed/failed:', upErr);
+    }
+
+    const cachedAvatar = userProfilesAvatar || localStorage.getItem('cached_avatar_url_' + userId);
+
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -445,6 +751,11 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
     if (data) {
       const enriched = await syncAndEnrichProfile(data, userId);
+      if (cachedAvatar) {
+        enriched.avatar_url = cachedAvatar;
+        enriched.profile_photo_url = cachedAvatar;
+        localStorage.setItem('cached_avatar_url_' + userId, cachedAvatar);
+      }
       setDbUser(enriched);
       if (data.email && adminEmails.includes(data.email.toLowerCase()) && data.role !== 'admin') {
         console.log('App Startup: Auto-repairing admin profile role by ID...');
@@ -453,6 +764,10 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', userId).single();
           if (freshProfile) {
             const enrichedFresh = await syncAndEnrichProfile(freshProfile, userId);
+            if (cachedAvatar) {
+              enrichedFresh.avatar_url = cachedAvatar;
+              enrichedFresh.profile_photo_url = cachedAvatar;
+            }
             setDbUser(enrichedFresh);
           }
         }
@@ -471,10 +786,18 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', userId).single();
         if (freshProfile) {
           const enrichedFresh = await syncAndEnrichProfile(freshProfile, userId);
+          if (cachedAvatar) {
+            enrichedFresh.avatar_url = cachedAvatar;
+            enrichedFresh.profile_photo_url = cachedAvatar;
+          }
           setDbUser(enrichedFresh);
         }
       } else {
         const enrichedFresh = await syncAndEnrichProfile({ id: userId, username: fallbackEmail.split('@')[0], email: fallbackEmail, role: isSetAdmin ? 'admin' : 'member' }, userId);
+        if (cachedAvatar) {
+          enrichedFresh.avatar_url = cachedAvatar;
+          enrichedFresh.profile_photo_url = cachedAvatar;
+        }
         setDbUser(enrichedFresh);
       }
     } else if (error && error.code !== 'PGRST116') {
@@ -500,7 +823,30 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
     if (data) {
       fetchLocalUserFaction(data.id);
+
+      // Query user_profiles database table first to pull avatar_public_url for persistence
+      let userProfilesAvatar: string | null = null;
+      try {
+        const { data: upData } = await supabase
+          .from('user_profiles')
+          .select('avatar_public_url')
+          .eq('user_id', data.id)
+          .maybeSingle();
+        if (upData?.avatar_public_url) {
+          userProfilesAvatar = upData.avatar_public_url;
+        }
+      } catch (upErr) {
+        console.warn('user_profiles retrieval by Email in App bypassed/failed:', upErr);
+      }
+
+      const cachedAvatar = userProfilesAvatar || localStorage.getItem('cached_avatar_url_' + data.id);
+
       const enriched = await syncAndEnrichProfile(data, data.id);
+      if (cachedAvatar) {
+        enriched.avatar_url = cachedAvatar;
+        enriched.profile_photo_url = cachedAvatar;
+        localStorage.setItem('cached_avatar_url_' + data.id, cachedAvatar);
+      }
       setDbUser(enriched);
       if (adminEmails.includes(email.toLowerCase()) && data.role !== 'admin') {
         console.log('App Startup: Auto-repairing admin profile role by Email...');
@@ -509,6 +855,10 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', data.id).single();
           if (freshProfile) {
             const enrichedFresh = await syncAndEnrichProfile(freshProfile, data.id);
+            if (cachedAvatar) {
+              enrichedFresh.avatar_url = cachedAvatar;
+              enrichedFresh.profile_photo_url = cachedAvatar;
+            }
             setDbUser(enrichedFresh);
           }
         }
@@ -526,10 +876,20 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         const { data: freshProfile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single();
         if (freshProfile) {
           const enrichedFresh = await syncAndEnrichProfile(freshProfile, session.user.id);
+          const cachedAvatar = localStorage.getItem('cached_avatar_url_' + session.user.id);
+          if (cachedAvatar) {
+            enrichedFresh.avatar_url = cachedAvatar;
+            enrichedFresh.profile_photo_url = cachedAvatar;
+          }
           setDbUser(enrichedFresh);
         }
       } else {
         const enrichedFresh = await syncAndEnrichProfile({ id: session.user.id, username: email.split('@')[0], email: email, role: isSetAdmin ? 'admin' : 'member' }, session.user.id);
+        const cachedAvatar = localStorage.getItem('cached_avatar_url_' + session.user.id);
+        if (cachedAvatar) {
+          enrichedFresh.avatar_url = cachedAvatar;
+          enrichedFresh.profile_photo_url = cachedAvatar;
+        }
         setDbUser(enrichedFresh);
       }
     } else if (error && error.code !== 'PGRST116') {
@@ -548,7 +908,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     id: firebaseUser.uid,
     email: firebaseUser.email,
     username: dbUser?.username || firebaseUser.email?.split('@')[0],
-    imageUrl: dbUser?.avatar_url || dbUser?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`
+    imageUrl: dbUser?.avatar_url || dbUser?.avatar || (firebaseUser ? localStorage.getItem('cached_avatar_url_' + firebaseUser.uid) : null) || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`
   } : null;
 
   const ext = user ? getStoredProfileExt(user.id) : { xp: 0, level: 1, is_premium: false };
@@ -673,6 +1033,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     { name: 'Database', path: '/database', icon: DatabaseIcon },
     { name: 'Neural News', path: '/news', icon: FileText },
     { name: 'Elite Leaderboard', path: '/leaderboard', icon: Trophy },
+    { name: '🏦 HOUSE TREASURY', path: '/house-treasury', icon: Landmark },
     { name: 'Recruitment', path: '/recruit', icon: RecruitIcon },
     { name: 'Profile Node', path: '/profile', icon: User },
   ];
@@ -702,8 +1063,18 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
   const hasSolarState = !!(currentUserFaction?.faction_name?.trim().toLowerCase().includes('stark') && isStarkSummer);
 
+  const headerProfileId = firebaseUser?.uid || currentDbUser?.id || '';
+  const headerAvatarPublicUrl = currentDbUser?.avatar_url || currentDbUser?.profile_photo_url || currentDbUser?.avatar || '';
+  const headerCachedUrl = headerProfileId ? (localStorage.getItem('cached_avatar_url_' + headerProfileId) || '') : '';
+  const headerDefaultPlaceholder = `https://api.dicebear.com/7.x/avataaars/svg?seed=${headerProfileId || 'default'}`;
+  const headerAvatarSrc = headerAvatarPublicUrl || headerCachedUrl || headerLocalBlob || headerDefaultPlaceholder;
+  const headerAvatarKey = headerAvatarPublicUrl || headerCachedUrl || headerLocalBlob;
+
+  const displayHeadline = activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED";
+
   return (
-    <div className={`flex h-screen w-full bg-[var(--faction-bg)] text-gray-200 overflow-hidden transition-all duration-700 ease-in-out ${hasSolarState ? 'animate-solar-radiation' : ''}`}>
+    <NewsContext.Provider value={{ activeArticle, setActiveArticle, breakingNews, setBreakingNews }}>
+      <div className={`flex min-h-screen w-full overflow-y-auto bg-background pb-12 bg-[var(--faction-bg)] text-gray-200 transition-all duration-700 ease-in-out ${hasSolarState ? 'animate-solar-radiation' : ''}`}>
       <style dangerouslySetInnerHTML={{ __html: getFactionStyleCSS(currentUserFaction?.faction_name, isStarkSummer) }} />
       <SolarFlareOverlay active={hasSolarState} />
       {/* Sidebar Overlay for Mobile */}
@@ -773,35 +1144,22 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </nav>
 
         <div className="p-4 border-t border-[var(--faction-border)] space-y-3">
-          {currentDbUser?.is_premium ? (
-            <div 
-              onClick={() => setIsUpgradeModalOpen(true)}
-              className="bg-gradient-to-r from-yellow-500/10 to-amber-500/10 border border-yellow-500/20 p-3 rounded-xl flex items-center gap-3 shadow-[0_0_15px_rgba(234,179,8,0.05)] hover:border-yellow-500/40 transition-colors cursor-pointer"
-            >
-              <div className="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center text-yellow-500 shrink-0 animate-pulse">
-                <Crown size={16} className="fill-yellow-500/20" />
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] font-mono text-yellow-500 font-bold uppercase tracking-widest">
-                    {currentDbUser?.premium_tier || 'MONARCH'} PASS
-                  </span>
-                  <span className="text-[8px] bg-yellow-500 text-black px-1 font-black rounded">LVL {currentDbUser?.level || 1}</span>
-                </div>
-                <p className="text-xs font-black text-white uppercase italic tracking-tight">
-                  {currentDbUser?.premium_tier === 'monarch' ? '👑 MONARCH ELITE' : currentDbUser?.premium_tier === 'god' ? '⚡ GOD AGENT' : '✨ PLUS VISITOR'}
-                </p>
-              </div>
+          <div className="bg-black/40 border border-[var(--faction-border)] p-3 rounded-xl flex items-center gap-3 shadow-[0_0_15px_rgba(255,255,255,0.02)]">
+            <div className="w-8 h-8 rounded-full bg-[var(--faction-primary-glow,rgba(220,38,38,0.1))] border border-[var(--faction-primary,rgba(220,38,38,0.5))] flex items-center justify-center text-[var(--faction-primary,#E50914)] shrink-0 font-extrabold font-mono text-xs">
+              ★
             </div>
-          ) : (
-            <button 
-              onClick={() => setIsUpgradeModalOpen(true)}
-              className="w-full bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-600 hover:to-amber-700 text-black py-2.5 px-3 rounded-lg flex items-center justify-center gap-2 text-xs font-black uppercase tracking-wider transition-all duration-300 shadow-[0_0_15px_rgba(245,158,11,0.2)] hover:shadow-[0_0_25px_rgba(245,158,11,0.4)] hover:scale-[1.02]"
-            >
-              <Crown size={14} className="fill-black" />
-              Upgrade to Otaku Pass
-            </button>
-          )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[9px] font-mono text-[var(--faction-primary,#E50914)] font-black uppercase tracking-widest">
+                  CORES SYNCED
+                </span>
+                <span className="text-[8px] bg-white/10 text-gray-300 px-1 font-bold rounded">LVL {currentDbUser?.level || 1}</span>
+              </div>
+              <p className="text-xs font-mono font-black text-white uppercase truncate">
+                {currentDbUser?.username || firebaseUser?.email?.split('@')[0] || 'AGENT'}
+              </p>
+            </div>
+          </div>
 
           <div className="bg-[#111] rounded-lg p-4 border border-[var(--faction-border)]">
             <p className="text-[10px] text-gray-500 mb-2 uppercase tracking-widest font-black">Recruitment Active</p>
@@ -891,7 +1249,12 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                      ? 'border-yellow-500 shadow-[0_0_12px_rgba(234,179,8,0.45)] hover:scale-105' 
                      : 'border-[var(--faction-border)]'
                 }`}>
-                  <img src={user?.imageUrl || undefined} alt="Avatar" className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" />
+                  <img 
+                    src={headerAvatarSrc} 
+                    key={headerAvatarKey || 'avatar-header'}
+                    alt="Avatar" 
+                    className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-500" 
+                  />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent flex items-end justify-center p-1 opacity-0 group-hover:opacity-100 transition-opacity">
                      <UserIcon size={12} className="text-white" />
                   </div>
@@ -902,6 +1265,18 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto custom-scrollbar relative">
+          {/* Headline Frame Component */}
+          <div className="bg-[#050508]/90 border-b border-[var(--faction-border)] py-2 px-6 lg:px-8 flex items-center gap-4 overflow-hidden select-none shrink-0 z-10 sticky top-0 backdrop-blur-md">
+            <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-600/10 border border-red-500/30 rounded text-red-500 text-[9px] font-black uppercase tracking-widest shrink-0 animate-pulse">
+              <span className="inline-block w-1 h-1 rounded-full bg-red-600"></span>
+              NEURAL STREAM
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <div className="animate-marquee-slower whitespace-nowrap text-[10px] font-mono font-bold tracking-[0.2em] text-gray-300">
+                {activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED"} • {activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED"} • {activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED"}
+              </div>
+            </div>
+          </div>
           {children}
         </main>
 
@@ -1126,9 +1501,9 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             </aside>
           </>
         )}
-        {/* Otaku Pass Premium Subscription Modal */}
+        {/* Otaku Pass Premium Subscription Modal disabled */}
         <AnimatePresence>
-          {isUpgradeModalOpen && (
+          {false && (
             <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
               {/* Dark Backing Blur */}
               <motion.div 
@@ -1558,6 +1933,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </AnimatePresence>
       </div>
     </div>
+    </NewsContext.Provider>
   );
 }
 
@@ -1574,6 +1950,7 @@ export default function App() {
           <Route path="/news/:id" element={<NewsDetail />} />
           <Route path="/profile" element={<Profile />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
+          <Route path="/house-treasury" element={<HouseCards />} />
           <Route path="/anime/:id" element={<AnimeDetails />} />
           <Route path="/recruit" element={<Recruitment />} />
           <Route path="/admin" element={<Admin />} />

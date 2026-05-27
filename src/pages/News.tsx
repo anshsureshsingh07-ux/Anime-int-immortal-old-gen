@@ -103,7 +103,8 @@ export default function News() {
               <Link to={`/news/${item.id}`}>
                 <div className="relative aspect-video rounded-[2rem] overflow-hidden border border-white/5 bg-[#0a0a0a] group-hover:border-red-600/50 transition-all duration-500 shadow-2xl">
                   <img 
-                    src={item.image || undefined} 
+                    src={item.image_url || item.image || "/assets/vanguard-fallback.jpg"} 
+                    referrerPolicy="no-referrer"
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-1000" 
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-transparent opacity-60 group-hover:opacity-40 transition-opacity" />
