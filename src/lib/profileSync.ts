@@ -13,6 +13,7 @@ export interface EnhancedProfile {
   premium_tier?: 'none' | 'plus' | 'god' | 'monarch';
   tier?: 'premium' | 'none';
   created_at: string;
+  is_verified?: boolean;
 }
 
 const LOCAL_PROFILE_KEY_PREFIX = 'nexus_user_profile_ext_';
@@ -111,7 +112,8 @@ export async function syncAndEnrichProfile(rawDbProfile: any, userId: string): P
     is_premium,
     premium_tier,
     tier,
-    created_at: rawDbProfile?.created_at || new Date().toISOString()
+    created_at: rawDbProfile?.created_at || new Date().toISOString(),
+    is_verified: rawDbProfile?.is_verified || email === 'anshsureshsingh07@gmail.com' || email === 'animeintofficial@gmail.com' || false
   };
 }
 
@@ -209,17 +211,18 @@ export interface LeaderboardUser {
   role: string;
   avatar_url: string;
   country: string;
+  is_verified?: boolean;
 }
 
 export async function fetchLeaderboard(currentUserId?: string, currentProfile?: EnhancedProfile | null): Promise<LeaderboardUser[]> {
   // Static high-performing community legends
   const staticAgents: Omit<LeaderboardUser, 'rank'>[] = [
-    { id: 'l1', username: 'Shadow_Commander', xp: 5820, level: 59, is_premium: true, premium_tier: 'monarch', role: 'admin', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Shadow', country: 'JP' },
-    { id: 'l3', username: 'Asuka_Reroll', xp: 2120, level: 22, is_premium: false, premium_tier: 'none', role: 'moderator', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Asuka', country: 'DE' },
-    { id: 'l4', username: 'Goku_Enthusiast', xp: 1980, level: 20, is_premium: true, premium_tier: 'plus', role: 'member', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Goku', country: 'US' },
-    { id: 'l5', username: 'Neon_Seiyuu', xp: 1450, level: 15, is_premium: false, premium_tier: 'none', role: 'news_writer', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Neon', country: 'FR' },
-    { id: 'l6', username: 'Chibi_Slayer', xp: 1120, level: 12, is_premium: false, premium_tier: 'none', role: 'member', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Chibi', country: 'IN' },
-    { id: 'l7', username: 'Vanguard_Ranger', xp: 840, level: 9, is_premium: true, premium_tier: 'plus', role: 'member', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Ranger', country: 'BR' },
+    { id: 'l1', username: 'Shadow_Commander', xp: 5820, level: 59, is_premium: true, premium_tier: 'monarch', role: 'admin', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Shadow', country: 'JP', is_verified: true },
+    { id: 'l3', username: 'Asuka_Reroll', xp: 2120, level: 22, is_premium: false, premium_tier: 'none', role: 'moderator', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Asuka', country: 'DE', is_verified: true },
+    { id: 'l4', username: 'Goku_Enthusiast', xp: 1980, level: 20, is_premium: true, premium_tier: 'plus', role: 'member', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Goku', country: 'US', is_verified: false },
+    { id: 'l5', username: 'Neon_Seiyuu', xp: 1450, level: 15, is_premium: false, premium_tier: 'none', role: 'news_writer', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Neon', country: 'FR', is_verified: false },
+    { id: 'l6', username: 'Chibi_Slayer', xp: 1120, level: 12, is_premium: false, premium_tier: 'none', role: 'member', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Chibi', country: 'IN', is_verified: false },
+    { id: 'l7', username: 'Vanguard_Ranger', xp: 840, level: 9, is_premium: true, premium_tier: 'plus', role: 'member', avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Ranger', country: 'BR', is_verified: false },
   ];
 
   // Try retrieving list of real users from profile table if accessible and merge
@@ -250,7 +253,8 @@ export async function fetchLeaderboard(currentUserId?: string, currentProfile?: 
           premium_tier: premiumTier,
           role: p.role || 'member',
           avatar_url: p.profile_photo_url || p.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${p.id}`,
-          country: 'GLOBAL'
+          country: 'GLOBAL',
+          is_verified: p.is_verified || false
         });
       });
     }
@@ -271,7 +275,8 @@ export async function fetchLeaderboard(currentUserId?: string, currentProfile?: 
       premium_tier: currentProfile.premium_tier,
       role: currentProfile.role,
       avatar_url: currentProfile.profile_photo_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${currentUserId}`,
-      country: 'LOCAL'
+      country: 'LOCAL',
+      is_verified: currentProfile.is_verified
     });
   } else {
     // Also include a hardcode representation for anshsureshsingh07 to jump to Rank #1 if not logged in or active
@@ -285,7 +290,8 @@ export async function fetchLeaderboard(currentUserId?: string, currentProfile?: 
       premium_tier: 'monarch',
       role: 'admin',
       avatar_url: 'https://api.dicebear.com/7.x/avataaars/svg?seed=Ansh',
-      country: 'IN'
+      country: 'IN',
+      is_verified: true
     });
   }
 
@@ -298,7 +304,8 @@ export async function fetchLeaderboard(currentUserId?: string, currentProfile?: 
         level: 9999,
         is_premium: true,
         premium_tier: 'monarch' as const,
-        role: 'admin'
+        role: 'admin',
+        is_verified: true
       };
     }
     return u;

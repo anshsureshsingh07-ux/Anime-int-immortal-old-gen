@@ -28,7 +28,8 @@ import {
   Copy,
   ArrowLeft,
   Upload,
-  Landmark
+  Landmark,
+  MessageSquare
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
@@ -543,6 +544,55 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       window.removeEventListener('stark-summer-change', handleSummerChange);
     };
   }, []);
+
+  // Handswipe Gesture System specifically for Mobile Users to Open / Close Navigation Sidebar
+  useEffect(() => {
+    let touchStartX = 0;
+    let touchStartY = 0;
+    const swipeThreshold = 50; // minimum distance in px to register a swipe
+    const edgeThreshold = 60;  // must start swipe from the extreme left edge of screen to open the sidebar
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return; // only track single-finger gestures
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (e.changedTouches.length !== 1) return;
+      
+      const touchEndX = e.changedTouches[0].clientX;
+      const touchEndY = e.changedTouches[0].clientY;
+      
+      const diffX = touchEndX - touchStartX;
+      const diffY = touchEndY - touchStartY;
+
+      // Ensure gesture was primarily horizontal (horizontal displacement 1.5x greater than vertical)
+      if (Math.abs(diffX) > Math.abs(diffY) * 1.5) {
+        if (Math.abs(diffX) > swipeThreshold) {
+          if (diffX > 0) {
+            // Swiped right: open menu if swipe started near the left edge of the screen
+            if (!isSidebarOpen && touchStartX <= edgeThreshold) {
+              setIsSidebarOpen(true);
+            }
+          } else {
+            // Swiped left: close menu if sidebar is currently open
+            if (isSidebarOpen) {
+              setIsSidebarOpen(false);
+            }
+          }
+        }
+      }
+    };
+
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [isSidebarOpen]);
 
   // Dynamic Release Tracker States
   const [isReleaseTrackerDrawerOpen, setIsReleaseTrackerDrawerOpen] = useState(false);

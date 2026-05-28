@@ -346,12 +346,12 @@ export default function Home() {
           <div className="relative h-80 w-full rounded-xl overflow-hidden group border border-[#1F1F1F]">
             <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent z-10"></div>
             <img 
-              src={heroImage} 
-              alt="Featured" 
+              src={latestBreakingNews?.image_url || latestBreakingNews?.image || "/assets/vanguard-fallback.jpg"} 
+              alt="Featured News"
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
-                if (target.src !== "https://images.unsplash.com/photo-1541562232579-512a21360020?auto=format&fit=crop&q=80&w=2670") {
-                  target.src = "https://images.unsplash.com/photo-1541562232579-512a21360020?auto=format&fit=crop&q=80&w=2670";
+                if (target.src !== "/assets/vanguard-fallback.jpg") {
+                  target.src = "/assets/vanguard-fallback.jpg";
                 }
               }}
               className="w-full h-full object-cover transition-opacity duration-300 group-hover:scale-105 transition-all duration-1000 brightness-75"

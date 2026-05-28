@@ -7,6 +7,9 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { getWatchlist, removeFromWatchlist, WatchlistItem } from '../lib/watchlist';
 import { getStoredProfileExt, calculateLevel, syncAndEnrichProfile, awardXP } from '../lib/profileSync';
+import { VerifiedBadge } from '../components/VerifiedBadge';
+import Cropper from 'react-easy-crop';
+
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -49,6 +52,9 @@ export default function Profile() {
   const [showCropModal, setShowCropModal] = useState(false);
   const [cropImageRaw, setCropImageRaw] = useState<File | null>(null);
   const [cropImageSrc, setCropImageSrc] = useState<string>('');
+  const [crop, setCrop] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<any>(null);
   const [cropZoom, setCropZoom] = useState(1);
   const [cropPanX, setCropPanX] = useState(0);
   const [cropPanY, setCropPanY] = useState(0);
@@ -683,6 +689,9 @@ export default function Profile() {
     setCropZoom(1);
     setCropPanX(0);
     setCropPanY(0);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCroppedAreaPixels(null);
     setShowCropModal(true);
 
     // Clear element value to allow subsequent selections of the same file
@@ -716,85 +725,65 @@ export default function Profile() {
   };
 
   const handleCropConfirm = () => {
-    if (!cropImageSrc) return;
-    
-    // Create an image element to read real dimensions
+    if (!cropImageSrc || !croppedAreaPixels) return;
+
     const imgElement = new Image();
     imgElement.src = cropImageSrc;
+    imgElement.crossOrigin = 'anonymous';
     imgElement.onload = async () => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 400;
-      canvas.height = 400;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        // Clear canvas with standard deep dark interface backdrop
-        ctx.fillStyle = '#050505';
-        ctx.fillRect(0, 0, 400, 400);
-
-        // Center-crop canvas boundary math:
-        // Screen viewport container is 288x288 px. Let's calculate displayed layout.
-        const viewportSize = 288;
-        let renderWidth = imgElement.naturalWidth;
-        let renderHeight = imgElement.naturalHeight;
+      try {
+        const canvas = document.createElement('canvas');
         
-        const ratio = imgElement.naturalWidth / imgElement.naturalHeight;
-        if (ratio > 1) {
-          renderWidth = viewportSize;
-          renderHeight = viewportSize / ratio;
-        } else {
-          renderHeight = viewportSize;
-          renderWidth = viewportSize * ratio;
-        }
-
-        // Display translation coordinate calculations:
-        const dx = (viewportSize - renderWidth) / 2 + cropPanX;
-        const dy = (viewportSize - renderHeight) / 2 + cropPanY;
-
-        // Scale factor from 288 viewport to high-res output canvas
-        const outputScale = 400 / viewportSize;
-
-        ctx.save();
+        // Compression: Force 1:1 max pixel boundaries (500x500 px) to keep avatars lightweight and high performance
+        const outputSize = 500;
+        canvas.width = outputSize;
+        canvas.height = outputSize;
         
-        // Translate context to center of canvas, apply crop zoom, then translate back
-        ctx.translate(200, 200);
-        ctx.scale(cropZoom, cropZoom);
-        ctx.translate(-200, -200);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Failed to capture 2D graphics render plane.');
 
-        // Draw image onto the canvas with scaling and offset adjustments
+        // Elegantly clear the canvas with full aesthetic deep dark background
+        ctx.fillStyle = '#09090b';
+        ctx.fillRect(0, 0, outputSize, outputSize);
+
+        // Draw image mapping cropped area coordinates to 500x500 canvas coordinates
         ctx.drawImage(
           imgElement,
-          dx * outputScale,
-          dy * outputScale,
-          renderWidth * outputScale,
-          renderHeight * outputScale
+          croppedAreaPixels.x,
+          croppedAreaPixels.y,
+          croppedAreaPixels.width,
+          croppedAreaPixels.height,
+          0,
+          0,
+          outputSize,
+          outputSize
         );
 
-        ctx.restore();
-
-        // Convert canvas contents into clean Base64 payload
+        // Convert the uniform canvas into a high performance client-side Base64 data URL
         const croppedBase64 = canvas.toDataURL('image/png');
-        
-        // Execute upload transaction
-        await executeCroppedUpload(croppedBase64);
+        setLocalFileBlobUrl(croppedBase64);
+
+        // Upload the clean base64 via the API proxy
+        await executeBase64Upload(croppedBase64);
         setShowCropModal(false);
+      } catch (err: any) {
+        setMsg({ type: 'error', text: 'Cropping computation error: ' + err.message });
       }
     };
   };
 
-  const executeCroppedUpload = async (base64String: string) => {
+  const executeBase64Upload = async (base64String: string) => {
     if (!fbUser || !profile) return;
 
     setUploading(true);
-    // Force-clear any previous error banner instantly
     setMsg({ type: '', text: '' });
 
     try {
-      // Pop live local crop preview immediately
-      setLocalFileBlobUrl(base64String);
+      // Use the user's ID as folder name to conform strictly with RLS / storage policies
+      const randomSeed = Math.random().toString(36).substring(2);
+      const filePath = `${profile.id}/${randomSeed}.png`;
 
-      // Explicitly append the authenticated user ID string as a clean filename path
-      const filePath = `profiles/${profile.id}.png`;
-
+      // Use the server-side /api/upload proxy which runs as service role / master client
       const { data: { session: currentSession } } = await supabase.auth.getSession();
       const headers: Record<string, string> = {
         'Content-Type': 'application/json'
@@ -803,33 +792,29 @@ export default function Profile() {
         headers['Authorization'] = `Bearer ${currentSession.access_token}`;
       }
 
-      // Mock Client Storage representation of target signature requested:
-      // supabase.storage.from('avatar').upload(filePath, file, { upsert: true, cacheControl: '3600' })
       const response = await fetch('/api/upload', {
         method: 'POST',
         headers,
         body: JSON.stringify({
           bucket: 'avatar',
           fileName: filePath,
-          fileData: base64String, // Pristine cropped image payload
-          contentType: 'image/png',
-          upsert: true,
-          cacheControl: '3600',
-          options: {
-            upsert: true,
-            cacheControl: '3600'
-          }
+          fileData: base64String,
+          contentType: 'image/png'
         })
       });
 
       if (!response.ok) {
         const resError = await response.json();
-        throw new Error(resError.error || 'Server upload failed');
+        throw new Error(resError.error || 'Server upload proxy failed');
       }
 
       const { publicUrl } = await response.json();
 
-      // Ensure we hit the user_profiles table as requested
+      if (!publicUrl) {
+        throw new Error('Verification failure: Public URL generation rejected from backend.');
+      }
+
+      // 2. Fallback double updates to keep other tables in exact parity
       try {
         await supabase
           .from('user_profiles')
@@ -843,7 +828,7 @@ export default function Profile() {
         console.warn('user_profiles database sync notice:', upErr);
       }
 
-      // Synchronize public url profiles table immediately
+      // 3. Update core profiles table with compressed, pristine link
       const { error: dbUpdateError } = await supabase
         .from('profiles')
         .update({ 
@@ -853,26 +838,24 @@ export default function Profile() {
         .eq('id', profile?.id);
 
       if (dbUpdateError) {
-        console.error('Database sync error on profiles table:', dbUpdateError);
+        throw dbUpdateError;
       }
 
-      // Save to long-term local cache explicitly with 'cached_avatar_url_' + user.id namespace
-      if (profile?.id) {
-        localStorage.setItem('cached_avatar_url_' + profile.id, publicUrl);
-        // Double writing with key structure format to ensure robust cross-component resolution
-        localStorage.setItem(`cached_avatar_url_${profile.id}`, publicUrl);
-      }
+      // 4. Ensure long-term local caches are in lockstep
+      localStorage.setItem('cached_avatar_url_' + profile.id, publicUrl);
+      localStorage.setItem(`cached_avatar_url_${profile.id}`, publicUrl);
 
       setForm(prev => ({ ...prev, avatar_url: publicUrl }));
       setUploading(false);
-      setMsg({ type: 'success', text: 'Profile photo uploaded and synced with your neural node.' });
-      
-      // Dispatch profile update trigger event with custom detail for instantaneous header sync
+      setMsg({ type: 'success', text: 'Neural identity avatar uploaded and synchronized successfully.' });
+
+      // Signal cross-component interface elements to re-verify public identity link instantly
       window.dispatchEvent(new CustomEvent('profiles-updated', { 
-        detail: { blobUrl: base64String } 
+        detail: { blobUrl: publicUrl } 
       }));
     } catch (err: any) {
-      setMsg({ type: 'error', text: 'Upload failed: ' + (err.message || err) });
+      console.error('Core base64 upload failure:', err);
+      setMsg({ type: 'error', text: 'Biological interface upload fault: ' + (err.message || err) });
       setUploading(false);
     }
   };
@@ -1014,8 +997,9 @@ export default function Profile() {
             <h1 className="text-4xl font-black uppercase italic tracking-tighter text-white flex flex-wrap items-center justify-center md:justify-start gap-4">
               Neural <span className="text-[var(--faction-primary,#E50914)]">Identity</span>
             </h1>
-            <p className="text-sm font-mono font-black text-gray-300 tracking-widest uppercase md:text-left text-center break-all select-all">
-              {(form.username || profile?.username || 'ANSHSURESHSINGH07').toUpperCase()} {faction?.faction_name ? `| ${faction.faction_name.toUpperCase()}` : ''}
+            <p className="text-sm font-mono font-black text-gray-300 tracking-widest uppercase md:text-left text-center break-all select-all flex items-center justify-center md:justify-start gap-1.5">
+              <span>{(form.username || profile?.username || 'ANSHSURESHSINGH07').toUpperCase()} {faction?.faction_name ? `| ${faction.faction_name.toUpperCase()}` : ''}</span>
+              <VerifiedBadge isVerified={profile?.is_verified} size={11} />
             </p>
             <div className="flex flex-wrap justify-center md:justify-start gap-4">
               <span className="text-[10px] font-mono uppercase tracking-widest px-3 py-1 rounded-full border bg-white/5 text-gray-450 border-white/10">
@@ -1797,16 +1781,16 @@ export default function Profile() {
       {/* Interactive Photo Cropping Overlay Modal */}
       <AnimatePresence>
         {showCropModal && (
-          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md">
+          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4 bg-black/95 backdrop-blur-md">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-md bg-zinc-950 border border-[var(--faction-border,rgba(255,255,255,0.1))] rounded-3xl overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.9)]"
+              className="w-full max-w-md bg-zinc-950 border border-red-500/30 rounded-3xl overflow-hidden shadow-[0_0_50px_rgba(229,9,20,0.15)]"
             >
               {/* Header */}
               <div className="p-5 border-b border-zinc-900 bg-black/40 flex items-center justify-between">
-                <span className="font-mono text-[10px] uppercase font-black tracking-[0.2em] text-[var(--faction-primary,rgba(220,38,38,1))] flex items-center gap-2">
+                <span className="font-mono text-[10px] uppercase font-black tracking-[0.2em] text-[#E50914] flex items-center gap-2">
                   <Sparkles size={14} className="animate-pulse" /> Neural Photo Crop
                 </span>
                 <button 
@@ -1820,32 +1804,22 @@ export default function Profile() {
 
               {/* Viewport Frame with Adjustable Mask Overlay */}
               <div className="p-8 flex flex-col items-center justify-center space-y-6">
-                <div 
-                  className="relative w-72 h-72 rounded-2xl overflow-hidden bg-zinc-900 border border-zinc-850 flex items-center justify-center select-none cursor-move shadow-inner"
-                  style={{ content: '""' }}
-                >
-                  {/* Adjustable circular cropping masking ring overlay */}
-                  <div className="absolute inset-0 pointer-events-none z-10 flex items-center justify-center bg-black/45">
-                    <div className="w-52 h-52 rounded-full border-2 border-dashed border-[var(--faction-primary,rgba(220,38,38,1))] shadow-[0_0_30px_var(--faction-primary-glow,rgba(220,38,38,0.3))] relative flex items-center justify-center overflow-hidden">
-                      {/* Grid Alignment lines */}
-                      <div className="absolute w-full h-[1px] border-b border-dashed border-[var(--faction-primary,rgba(220,38,38,0.15))]"></div>
-                      <div className="absolute h-full w-[1px] border-r border-dashed border-[var(--faction-primary,rgba(220,38,38,0.15))]"></div>
-                    </div>
-                  </div>
-
-                  {/* Original full size preview underneath */}
-                  <img 
-                    src={cropImageSrc}
-                    style={{
-                      transform: `translate(${cropPanX}px, ${cropPanY}px) scale(${cropZoom})`,
-                      transition: isDragging ? 'none' : 'transform 0.15s ease-out'
+                <div className="relative w-80 h-80 rounded-2xl overflow-hidden bg-zinc-950 border border-zinc-900">
+                  <Cropper
+                    image={cropImageSrc}
+                    crop={crop}
+                    zoom={zoom}
+                    aspect={1}
+                    cropShape="round"
+                    showGrid={true}
+                    onCropChange={setCrop}
+                    onCropComplete={(croppedArea, croppedAreaPixels) => setCroppedAreaPixels(croppedAreaPixels)}
+                    onZoomChange={setZoom}
+                    classes={{
+                      containerClassName: "bg-zinc-950",
+                      mediaClassName: "max-w-none opacity-85",
+                      cropAreaClassName: "border-2 border-[#E50914] rounded-full shadow-[0_0_40px_rgba(229,9,20,0.3)]"
                     }}
-                    onMouseDown={handleDragStart}
-                    onMouseMove={handleDragMove}
-                    onMouseUp={handleDragEnd}
-                    onMouseLeave={handleDragEnd}
-                    className="max-w-full max-h-full object-contain pointer-events-auto"
-                    alt="Neural Source Scan"
                   />
                 </div>
 
@@ -1855,13 +1829,13 @@ export default function Profile() {
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-[9px] font-mono font-bold text-zinc-400 uppercase tracking-[0.1em]">
                       <span>Calibration Focal Range</span>
-                      <span className="text-[var(--faction-primary,rgba(220,38,38,1))]">{(cropZoom * 100).toFixed(0)}%</span>
+                      <span className="text-[#E50914]">{(zoom * 100).toFixed(0)}%</span>
                     </div>
                     <div className="flex items-center gap-3">
                       <button 
                         type="button"
-                        onClick={handleZoomOut}
-                        className="w-7 h-7 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white flex items-center justify-center font-mono text-sm tracking-tighter hover:bg-zinc-800 transition-colors"
+                        onClick={() => setZoom(prev => Math.max(1, prev - 0.1))}
+                        className="w-7 h-7 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white flex items-center justify-center font-mono text-sm tracking-tighter hover:bg-zinc-850 transition-colors"
                       >
                         -
                       </button>
@@ -1870,14 +1844,14 @@ export default function Profile() {
                         min="1"
                         max="3"
                         step="0.05"
-                        value={cropZoom}
-                        onChange={(e) => setCropZoom(parseFloat(e.target.value))}
-                        className="flex-1 accent-[var(--faction-primary,#dc2626)] h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
+                        value={zoom}
+                        onChange={(e) => setZoom(parseFloat(e.target.value))}
+                        className="flex-1 accent-[#E50914] h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer"
                       />
                       <button 
                         type="button"
-                        onClick={handleZoomIn}
-                        className="w-7 h-7 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white flex items-center justify-center font-mono text-sm tracking-tighter hover:bg-zinc-800 transition-colors"
+                        onClick={() => setZoom(prev => Math.min(3, prev + 0.1))}
+                        className="w-7 h-7 rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white flex items-center justify-center font-mono text-sm tracking-tighter hover:bg-zinc-850 transition-colors"
                       >
                         +
                       </button>
@@ -1885,7 +1859,7 @@ export default function Profile() {
                   </div>
 
                   <div className="text-[9px] font-mono text-zinc-500 text-center uppercase tracking-widest leading-relaxed">
-                    ⚙️ Drag photo inside biosensor relative plane to align centers
+                    ⚙️ Drag biosensor relative plane or slide to adjust frame
                   </div>
                 </div>
               </div>
@@ -1895,16 +1869,16 @@ export default function Profile() {
                 <button 
                   type="button"
                   onClick={() => setShowCropModal(false)}
-                  className="px-4 py-2 font-mono text-[9px] uppercase tracking-widest text-zinc-400 hover:text-zinc-200 transition-all"
+                  className="px-4 py-2 font-mono text-[9px] uppercase tracking-widest text-zinc-400 hover:text-white transition-all bg-zinc-900 border border-white/5 rounded-xl hover:bg-zinc-850"
                 >
-                  Abstain
+                  Cancel
                 </button>
                 <button 
                   type="button"
                   onClick={handleCropConfirm}
-                  className="px-5 py-2 rounded-xl font-mono text-[9px] uppercase font-bold tracking-widest bg-[var(--faction-primary,#dc2626)] text-white hover:opacity-90 transition-all shadow-[0_0_15px_var(--faction-primary-glow,rgba(220,38,38,0.2))] hover:scale-[1.02]"
+                  className="px-5 py-2 rounded-xl font-mono text-[9px] uppercase font-black tracking-widest bg-[#E50914] text-white hover:bg-red-700 hover:scale-[1.02] active:scale-95 transition-all shadow-[0_0_15px_rgba(229,9,20,0.4)]"
                 >
-                  Confirm Selection
+                  Apply Adjustment
                 </button>
               </div>
             </motion.div>

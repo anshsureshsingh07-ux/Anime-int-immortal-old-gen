@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, Crown, Sparkles, Filter, Search, Zap, CheckCircle2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { auth } from '../lib/firebase';
+import { VerifiedBadge } from '../components/VerifiedBadge';
 import { 
   fetchLeaderboard, 
   awardXP, 
@@ -385,8 +386,9 @@ export default function Leaderboard() {
               <img src={podiumUsers[1].avatar_url} className="w-full h-full object-cover rounded-full bg-slate-900" alt="Avatar" />
               <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-slate-400 text-black rounded-full flex items-center justify-center font-black text-[10px]">2ND</div>
             </div>
-            <h3 className="text-base font-black truncate max-w-full text-white">
-              {podiumUsers[1].username}
+            <h3 className="text-base font-black truncate max-w-full text-white flex items-center justify-center gap-1.5">
+              <span>{podiumUsers[1].username}</span>
+              <VerifiedBadge isVerified={podiumUsers[1].is_verified} size={10} />
             </h3>
             <p className="text-[10px] text-gray-500 font-mono mt-1 uppercase">LEVEL {podiumUsers[1].level} AGENT</p>
             <div className="mt-4 text-xs font-mono font-black text-gray-300 px-3 py-1.5 bg-[#17171B] border border-white/5 rounded-full">{podiumUsers[1].xp} XP</div>
@@ -409,8 +411,9 @@ export default function Leaderboard() {
               <div className="absolute -bottom-1 -right-1 w-8 h-8 bg-gradient-to-r from-yellow-400 to-amber-500 text-black rounded-full flex items-center justify-center font-black text-xs shadow-lg border border-yellow-300">1ST</div>
             </div>
 
-            <h3 className="text-xl font-black truncate max-w-full text-white">
-              {podiumUsers[0].username}
+            <h3 className="text-xl font-black truncate max-w-full text-white flex items-center justify-center gap-1.5 text-center">
+              <span>{podiumUsers[0].username}</span>
+              <VerifiedBadge isVerified={podiumUsers[0].is_verified} size={12} />
             </h3>
 
             <div className="flex flex-col items-center gap-1 mt-1.5">
@@ -435,8 +438,9 @@ export default function Leaderboard() {
               <img src={podiumUsers[2].avatar_url} className="w-full h-full object-cover rounded-full bg-amber-950" alt="Avatar" />
               <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-amber-600 text-black rounded-full flex items-center justify-center font-black text-[10px]">3RD</div>
             </div>
-            <h3 className="text-base font-black truncate max-w-full text-white">
-              {podiumUsers[2].username}
+            <h3 className="text-base font-black truncate max-w-full text-white flex items-center justify-center gap-1.5">
+              <span>{podiumUsers[2].username}</span>
+              <VerifiedBadge isVerified={podiumUsers[2].is_verified} size={10} />
             </h3>
             <p className="text-[10px] text-gray-500 font-mono mt-1 uppercase">LEVEL {podiumUsers[2].level} AGENT</p>
             <div className="mt-4 text-xs font-mono font-black text-gray-300 px-3 py-1.5 bg-[#17171B] border border-white/5 rounded-full">{podiumUsers[2].xp} XP</div>
@@ -500,8 +504,9 @@ export default function Leaderboard() {
                     {/* Username and details */}
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-xs font-black tracking-tight text-white">
-                          {userItem.username}
+                        <span className="text-xs font-black tracking-tight text-white flex items-center gap-1.5">
+                          <span>{userItem.username}</span>
+                          <VerifiedBadge isVerified={userItem.is_verified} size={8} />
                         </span>
 
                         {isSelf && (

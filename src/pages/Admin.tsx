@@ -10,6 +10,8 @@ import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { upgradeToPremium } from '../lib/profileSync';
 import { useNews } from '../App';
+import { BannerCropper } from '../components/BannerCropper';
+import { RecruitmentReview, checkAccess } from '../components/RecruitmentReview';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -40,7 +42,10 @@ export default function Admin() {
   const [anime, setAnime] = useState<any[]>([]);
   const [releases, setReleases] = useState<any[]>([]);
   const [polls, setPolls] = useState<any[]>([]);
+  const [reports, setReports] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [grantedRole, setGrantedRole] = useState<string | null>(null);
+  const [checkingAccessState, setCheckingAccessState] = useState(true);
 
   // User Directory search and filter states
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
@@ -88,17 +93,26 @@ export default function Admin() {
   };
 
   useEffect(() => {
-    const unsubscribeFirebase = onAuthStateChanged(auth, (user) => {
+    const unsubscribeFirebase = onAuthStateChanged(auth, async (user) => {
       if (user) {
         fetchProfile(user.uid);
+        if (user.email) {
+          const role = await checkAccess(user.email);
+          setGrantedRole(role);
+        }
       }
+      setCheckingAccessState(false);
     });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       setSession(session);
       if (session?.user) {
         fetchProfile(session.user.id);
         checkAndEnsureAdminProfile(session.user);
+        if (session.user.email) {
+          const role = await checkAccess(session.user.email);
+          setGrantedRole(role);
+        }
       }
     });
 
@@ -108,6 +122,7 @@ export default function Admin() {
     fetchAnime();
     fetchReleases();
     fetchPolls();
+    fetchReports();
     cleanupOldNews();
 
     return () => unsubscribeFirebase();
@@ -186,6 +201,15 @@ export default function Admin() {
       }
     } catch (err) {
       console.warn('Failed to fetch factions for Admin space:', err);
+    }
+  };
+
+  const fetchReports = async () => {
+    try {
+      const { data, error } = await supabase.from('reports').select('*').order('created_at', { ascending: false });
+      if (!error && data) setReports(data);
+    } catch (err) {
+      console.warn('Failed to fetch reports for Admin mainframe:', err);
     }
   };
 
@@ -450,7 +474,33 @@ export default function Admin() {
 
   const currentDbUser = dbUser || { role: 'admin' };
 
+  const isAdmin = (currentDbUser && (currentDbUser.role === 'admin' || currentDbUser.role === 'news_writer' || currentDbUser.role === 'moderator')) || 
+                  (session?.user?.email === 'anshsureshsingh07@gmail.com' || session?.user?.email === 'animeintofficial@gmail.com');
+
+  const isOwner = (session?.user?.email === 'anshsureshsingh07@gmail.com' || session?.user?.email === 'animeintofficial@gmail.com' || (currentDbUser && currentDbUser.role === 'admin'));
+
+  const canPostNews = isOwner || currentDbUser?.role === 'news_writer' || grantedRole?.toLowerCase() === 'news writer';
+
+  const hasAdminPanelAccess = isAdmin || !!grantedRole;
+
+  const allowedTabs = [
+    { id: 'news', name: 'News Manager', icon: FileText, show: canPostNews },
+    { id: 'anime', name: 'Anime Database', icon: BarChart, show: isOwner },
+    { id: 'releases', name: 'Release Tracker', icon: Clock, show: isOwner },
+    { id: 'polls', name: 'Community Polls', icon: BarChart, show: isOwner },
+    { id: 'apps', name: 'Recruitment Review', icon: UserCheck, show: isOwner },
+    { id: 'users', name: 'User Directory', icon: Users, show: isOwner },
+    { id: 'payments', name: 'Premium Ledger', icon: CreditCard, show: isOwner },
+    { id: 'settings', name: 'System Config', icon: Settings, show: isOwner },
+  ].filter(t => t.show);
+
   const [activeTab, setActiveTab] = useState('news');
+
+  useEffect(() => {
+    if (allowedTabs.length > 0 && !allowedTabs.some(t => t.id === activeTab)) {
+      setActiveTab(allowedTabs[0].id);
+    }
+  }, [canPostNews, isOwner, activeTab]);
 
   // News Form
   const [formError, setFormError] = useState<string | null>(null);
@@ -459,6 +509,7 @@ export default function Admin() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageUrl, setImageUrl] = useState<string>('');
   const [isDragOver, setIsDragOver] = useState(false);
+  const [cropperSrc, setCropperSrc] = useState<string | null>(null);
   const [newsForm, setNewsForm] = useState({
     title: '',
     description: '',
@@ -660,44 +711,127 @@ export default function Admin() {
     }
   };
 
-  const handleDirectUpload = async (file: File) => {
+  const handleFileSelect = (file: File) => {
     if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setCropperSrc(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCroppedUpload = async (croppedBlob: Blob) => {
     setUploading(true);
     setFormError(null);
     try {
-      const fileExt = file.name.split('.').pop() || 'png';
-      const fileName = `${Math.random()}.${fileExt}`;
-      const filePath = `headlines/${fileName}`;
+      const fileName = `cropped_${Date.now()}.jpg`;
 
-      let { error: uploadError } = await supabase.storage
-        .from('breaking-images')
-        .upload(filePath, file);
-
-      if (uploadError) {
-        throw uploadError;
+      // 1. Retrieve Auth Token for authorized proxy API requests
+      let token = null;
+      const { data: { session: currentSession } } = await supabase.auth.getSession();
+      if (currentSession?.access_token) {
+        token = currentSession.access_token;
+      } else if (auth.currentUser) {
+        try {
+          token = await auth.currentUser.getIdToken();
+        } catch (tokenErr) {
+          console.warn("Failed retrieving Firebase ID Token:", tokenErr);
+        }
       }
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('breaking-images')
-        .getPublicUrl(filePath);
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
+      // Prepare cropped file for proxy conversion
+      const croppedFile = new File([croppedBlob], fileName, { type: 'image/jpeg' });
+      const base64Data = await fileToBase64(croppedFile);
+
+      let publicUrl = '';
+
+      // 2. Perform server-side proxy upload first (immune to browser-side CORS / sandbox blocks)
+      try {
+        const response = await fetch('/api/upload', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            bucket: 'news',
+            fileName,
+            fileData: base64Data,
+            contentType: 'image/jpeg'
+          })
+        });
+
+        if (response.ok) {
+          const resJson = await response.json();
+          publicUrl = resJson.publicUrl;
+        } else {
+          console.warn('Backend proxy upload returned non-OK status, falling back to direct storage path');
+        }
+      } catch (proxyErr) {
+        console.warn('Backend proxy upload failed, attempting direct Supabase Storage upload:', proxyErr);
+      }
+
+      // 3. Fallback direct client upload if backend proxy upload failed
+      if (!publicUrl) {
+        let bucketName = 'news';
+        const filePath = `headlines/${fileName}`;
+        let { error: uploadError } = await supabase.storage
+          .from(bucketName)
+          .upload(filePath, croppedBlob, {
+            contentType: 'image/jpeg'
+          });
+
+        if (uploadError) {
+          console.warn(`Direct upload to '${bucketName}' bucket failed, trying 'breaking-images' fallback...`, uploadError);
+          bucketName = 'breaking-images';
+          const fallbackUpload = await supabase.storage
+            .from(bucketName)
+            .upload(filePath, croppedBlob, {
+              contentType: 'image/jpeg'
+            });
+          uploadError = fallbackUpload.error;
+        }
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        // Get the official Public URL from client storage
+        const { data: publicUrlData } = supabase.storage
+          .from(bucketName)
+          .getPublicUrl(filePath);
+
+        publicUrl = publicUrlData.publicUrl;
+      }
+
+      if (!publicUrl) {
+        throw new Error("Unable to resolve permanent public URL.");
+      }
+
+      // Save this PERMANENT URL to the form state
       setImageUrl(publicUrl);
       setNewsForm(prev => ({ ...prev, image: publicUrl }));
-      setImageFile(file);
+      setImageFile(croppedFile);
     } catch (err: any) {
-      console.warn("Direct Supabase Storage upload failed, applying secure local fallback:", err);
-      // Fallback: If bucket is uninitialized/unconfigured, fall back to safe local Object URL
-      const fallbackUrl = URL.createObjectURL(file);
+      console.warn("Direct Supabase Storage upload failed, applying secure local fallback preview:", err);
+      const fallbackUrl = URL.createObjectURL(croppedBlob);
       setImageUrl(fallbackUrl);
       setNewsForm(prev => ({ ...prev, image: fallbackUrl }));
-      setImageFile(file);
+      const croppedFile = new File([croppedBlob], `${Date.now()}.jpg`, { type: 'image/jpeg' });
+      setImageFile(croppedFile);
     } finally {
       setUploading(false);
+      setCropperSrc(null);
     }
   };
 
-  const isAdmin = (currentDbUser && (currentDbUser.role === 'admin' || currentDbUser.role === 'news_writer' || currentDbUser.role === 'moderator')) || 
-                  (session?.user?.email === 'anshsureshsingh07@gmail.com' || session?.user?.email === 'animeintofficial@gmail.com');
+  const handleDirectUpload = async (file: File) => {
+    handleFileSelect(file);
+  };
 
   const postNews = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -731,8 +865,9 @@ export default function Admin() {
       }
 
       let finalImageUrl = imageUrl || newsForm.image;
+      const isTemporaryBlob = finalImageUrl && String(finalImageUrl).startsWith('blob:');
 
-      if (!finalImageUrl && imageFile) {
+      if ((!finalImageUrl || isTemporaryBlob) && imageFile) {
         setUploading(true);
         try {
           const fileExt = imageFile.name.split('.').pop() || 'png';
@@ -820,6 +955,7 @@ export default function Admin() {
             description: insertPayload.description,
             category: insertPayload.category,
             image: insertPayload.image,
+            is_pinned: insertPayload.is_pinned || false,
             author_id: insertPayload.author_id,
             author_name: insertPayload.author_name,
             created_at: insertPayload.created_at
@@ -885,7 +1021,7 @@ export default function Admin() {
 
   if (loading && session && !dbUser) return <div className="p-20 text-center font-mono">Synchronizing with mainframe...</div>;
   
-  if (!isAdmin) return (
+  if (!hasAdminPanelAccess) return (
     <div className="max-w-2xl mx-auto px-8 py-40 text-center">
        <AlertCircle size={64} className="mx-auto text-red-600 mb-8" />
        <h1 className="text-3xl font-black uppercase tracking-tighter mb-4 italic">Access <span className="text-red-500">Denied</span></h1>
@@ -901,15 +1037,16 @@ export default function Admin() {
       <aside className="w-full md:w-64 space-y-2">
         <h2 className="text-xs font-black tracking-widest uppercase text-red-600 mb-10 pl-2">Admin <span className="text-white">Mainframe</span></h2>
         {[
-          { id: 'news', name: 'News Manager', icon: FileText },
-          { id: 'anime', name: 'Anime Database', icon: BarChart },
-          { id: 'releases', name: 'Release Tracker', icon: Clock },
-          { id: 'polls', name: 'Community Polls', icon: BarChart },
-          { id: 'apps', name: 'Applications', icon: UserCheck },
-          { id: 'users', name: 'User Directory', icon: Users },
-          { id: 'payments', name: 'Premium Ledger', icon: CreditCard },
-          { id: 'settings', name: 'System Config', icon: Settings },
-        ].map(item => (
+          { id: 'news', name: 'News Manager', icon: FileText, show: canPostNews },
+          { id: 'anime', name: 'Anime Database', icon: BarChart, show: isOwner },
+          { id: 'releases', name: 'Release Tracker', icon: Clock, show: isOwner },
+          { id: 'polls', name: 'Community Polls', icon: BarChart, show: isOwner },
+          { id: 'reports', name: 'Reports Control', icon: AlertCircle, show: isOwner },
+          { id: 'apps', name: 'Recruitment Review', icon: UserCheck, show: isOwner },
+          { id: 'users', name: 'User Directory', icon: Users, show: isOwner },
+          { id: 'payments', name: 'Premium Ledger', icon: CreditCard, show: isOwner },
+          { id: 'settings', name: 'System Config', icon: Settings, show: isOwner },
+        ].filter(item => item.show).map(item => (
           <button 
             key={item.id}
             onClick={() => setActiveTab(item.id)}
@@ -971,40 +1108,50 @@ export default function Admin() {
                        <div className="space-y-2">
                           <label className="text-[10px] font-black uppercase text-gray-500">📸 UPLOAD TELEMETRY VISUAL (HERO BANNER)</label>
                           <div className="space-y-4">
-                            <div 
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                                setIsDragOver(true);
-                              }}
-                              onDragLeave={() => setIsDragOver(false)}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                setIsDragOver(false);
-                                const file = e.dataTransfer.files?.[0];
-                                if (file) {
-                                  handleDirectUpload(file);
-                                }
-                              }}
-                              className={`w-full bg-[#0a0a0a]/85 backdrop-blur-md rounded-lg p-6 flex flex-col items-center justify-center gap-2 border-2 border-dashed transition-all duration-300 relative ${isDragOver ? 'border-red-500 bg-red-950/15 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'border-white/10 hover:border-red-650/40'}`}
-                            >
-                              <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer py-4">
-                                <Upload className={uploading ? "animate-bounce text-red-500" : "text-gray-400"} size={24} />
-                                <span className="text-[10px] font-mono uppercase text-gray-500 mt-2 text-center font-bold">
-                                  {imageFile ? imageFile.name : uploading ? "Synchronizing Telemetry Core..." : "DRAG & DROP TELEMETRY FILE OR CLICK TO BROWSE"}
-                                </span>
-                                <input 
-                                  type="file" 
-                                  className="hidden" 
-                                  accept="image/*"
-                                  onChange={(e) => {
-                                    const file = e.target.files?.[0];
-                                    if (file) {
-                                      handleDirectUpload(file);
-                                    }
-                                  }}
+                            {cropperSrc ? (
+                              <div className="w-full">
+                                <BannerCropper
+                                  imageSrc={cropperSrc}
+                                  onCropComplete={handleCroppedUpload}
+                                  onCancel={() => setCropperSrc(null)}
                                 />
-                              </label>
-                            </div>
+                              </div>
+                            ) : (
+                              <div 
+                                onDragOver={(e) => {
+                                  e.preventDefault();
+                                  setIsDragOver(true);
+                                }}
+                                onDragLeave={() => setIsDragOver(false)}
+                                onDrop={(e) => {
+                                  e.preventDefault();
+                                  setIsDragOver(false);
+                                  const file = e.dataTransfer.files?.[0];
+                                  if (file) {
+                                    handleFileSelect(file);
+                                  }
+                                }}
+                                className={`w-full bg-[#0a0a0a]/85 backdrop-blur-md rounded-lg p-6 flex flex-col items-center justify-center gap-2 border-2 border-dashed transition-all duration-300 relative ${isDragOver ? 'border-red-500 bg-red-950/15 shadow-[0_0_15px_rgba(239,68,68,0.5)]' : 'border-white/10 hover:border-red-650/40'}`}
+                              >
+                                <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer py-4">
+                                  <Upload className={uploading ? "animate-bounce text-red-500" : "text-gray-400"} size={24} />
+                                  <span className="text-[10px] font-mono uppercase text-gray-500 mt-2 text-center font-bold">
+                                    {imageFile ? imageFile.name : uploading ? "Synchronizing Telemetry Core..." : "DRAG & DROP TELEMETRY FILE OR CLICK TO BROWSE"}
+                                  </span>
+                                  <input 
+                                    type="file" 
+                                    className="hidden" 
+                                    accept="image/*"
+                                    onChange={(e) => {
+                                      const file = e.target.files?.[0];
+                                      if (file) {
+                                        handleFileSelect(file);
+                                      }
+                                    }}
+                                  />
+                                </label>
+                              </div>
+                            )}
                             {/* 200px Micro-Thumbnail Feedback Frame */}
                             {(imageUrl || imageFile) && (
                               <div className="w-[200px] h-[200px] bg-black border-2 border-red-500/40 rounded-lg overflow-hidden relative group shadow-[0_0_15px_rgba(239,68,68,0.3)] mt-2">
@@ -1335,72 +1482,8 @@ export default function Admin() {
           )}
 
          {activeTab === 'apps' && (
-           <div className="space-y-8">
-              <h3 className="text-sm font-black uppercase tracking-widest text-gray-500 mb-6">Pending Vanguard Applications</h3>
-              {applications && applications.length > 0 ? (
-                applications.map(app => (
-                  <div key={app.id} className="cyber-card p-6 border-white/10">
-                    <div className="flex justify-between items-start mb-6">
-                       <div className="flex items-center gap-4">
-                          <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${app.user_id}`} className="w-12 h-12 rounded-full border border-white/10" />
-                          <div>
-                             <h4 className="text-sm font-black uppercase tracking-tighter italic">{app.name}</h4>
-                             <span className="text-[10px] font-mono text-gray-500 uppercase">{app.user_email}</span>
-                          </div>
-                       </div>
-                       <div className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${
-                         app.status === 'pending' ? 'bg-yellow-500/10 text-yellow-500' :
-                         app.status === 'approved' ? 'bg-green-500/10 text-green-500' :
-                         'bg-red-500/10 text-red-500'
-                       }`}>
-                         {app.status}
-                       </div>
-                    </div>
-
-                    <div className="grid grid-cols-4 gap-6 mb-8 text-[10px] uppercase font-mono">
-                       <div><span className="text-gray-600">Role</span><br/><span className="text-red-500">{app.role}</span></div>
-                       <div><span className="text-gray-600">Discord</span><br/><span className="text-white">{app.discord}</span></div>
-                       <div><span className="text-gray-600">Age</span><br/><span className="text-white">{app.age}</span></div>
-                       <div><span className="text-gray-600">Availability</span><br/><span className="text-white">{app.availability}</span></div>
-                    </div>
-
-                    <div className="space-y-4 mb-8">
-                       <div>
-                          <h5 className="text-[8px] font-black uppercase text-gray-600 mb-1">Skill Matrix</h5>
-                          <p className="text-xs text-gray-400 italic">"{app.skills}"</p>
-                       </div>
-                       <div>
-                          <h5 className="text-[8px] font-black uppercase text-gray-600 mb-1">Bio/Experience</h5>
-                          <p className="text-xs text-gray-400 italic">"{app.experience}"</p>
-                       </div>
-                    </div>
-
-                    {app.status === 'pending' && (
-                      <div className="flex gap-4 pt-6 border-t border-white/5">
-                        <button 
-                          onClick={() => handleAppStatus(app.id, 'approved', app.user_id, app.role)}
-                          className="flex-1 flex items-center justify-center gap-2 bg-green-600/20 text-green-500 border border-green-600/30 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-green-600 hover:text-white transition-all shadow-[0_0_15px_rgba(22,163,74,0.2)]"
-                        >
-                          <CheckCircle2 size={14} /> Approve Node
-                        </button>
-                        <button 
-                          onClick={() => handleAppStatus(app.id, 'rejected', app.user_id, app.role)}
-                          className="flex-1 flex items-center justify-center gap-2 bg-red-600/20 text-red-500 border border-red-600/30 py-2 rounded-lg text-[10px] font-black uppercase tracking-widest hover:bg-red-600 hover:text-white transition-all shadow-[0_0_15px_rgba(220,38,38,0.2)]"
-                        >
-                          <XCircle size={14} /> Sever Link
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))
-              ) : !applications ? (
-                <div className="p-12 text-center text-gray-600 font-mono text-xs italic">Awaiting neural applications...</div>
-              ) : (
-                <div className="p-12 text-center border-dashed border-white/5 border rounded-3xl opacity-20">
-                   <Users className="mx-auto mb-4" />
-                   <span className="font-mono text-xs uppercase tracking-widest">No applicants detected</span>
-                </div>
-              )}
+           <div className="space-y-8 animate-fade-in">
+             <RecruitmentReview onApprovalComplete={fetchApplications} />
            </div>
          )}
 
@@ -1873,6 +1956,190 @@ export default function Admin() {
                       </div>
                    </form>
                 </section>
+             </div>
+          )}
+
+          {activeTab === 'reports' && (
+             <div className="space-y-8 animate-fade-in font-sans">
+                <div>
+                   <h3 className="text-xl font-black uppercase tracking-widest text-red-500 font-mono flex items-center gap-2">
+                      <Shield className="text-red-500 shrink-0" size={24} /> Neural Report Monitor & Resolution Core
+                   </h3>
+                   <p className="text-xs text-gray-400 font-mono uppercase mt-1">
+                      Consolidated user misconduct flags, logs, and server-authoritative account termination controls.
+                   </p>
+                </div>
+
+                {/* Controls / Filter row */}
+                <div className="p-4 bg-zinc-950/80 rounded-xl border border-white/5 font-mono flex items-center justify-between gap-4">
+                   <span className="text-[10px] uppercase font-mono tracking-wider text-gray-400">
+                      Active Inbound Incident Flags: <span className="text-white font-black">{reports.length}</span>
+                   </span>
+                   <button 
+                      onClick={fetchReports}
+                      className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white rounded-lg border border-white/5 transition-all uppercase text-[9px] font-mono font-bold tracking-wider"
+                   >
+                      Sync Report Ledger
+                   </button>
+                </div>
+
+                {/* Reports Listing Grid */}
+                {reports.length === 0 ? (
+                   <div className="p-16 border border-dashed border-white/5 rounded-3xl bg-black/10 text-center font-mono text-[10px] uppercase tracking-widest text-[#71717A]">
+                      [All clear. Zero neural misconduct incidents detected in the mainframe.]
+                   </div>
+                ) : (
+                   <div className="space-y-4">
+                      {reports.map((report) => {
+                         const reporter = users.find(u => u.id === report.reporter_id);
+                         const reportedUser = users.find(u => u.id === report.reported_user_id);
+                         
+                         return (
+                            <div 
+                               key={report.id} 
+                               id={`report-node-${report.id}`}
+                               className={`p-6 rounded-2xl border ${
+                                  report.status === 'banned' 
+                                     ? 'bg-red-950/5 border-red-900/10' 
+                                     : report.status === 'resolved'
+                                     ? 'bg-zinc-950/50 border-white/5'
+                                     : 'bg-zinc-900/20 border-red-500/30'
+                               } flex flex-col md:flex-row md:items-start justify-between gap-6 transition-all`}
+                            >
+                               <div className="space-y-3 flex-1 min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                     <span className="px-2 py-0.5 text-[8px] font-mono font-black uppercase rounded bg-red-650/15 text-red-500 border border-red-500/10">
+                                        Incident ID: #{report.id.slice(0, 6)}
+                                     </span>
+                                     <span className={`px-2 py-0.5 text-[8px] font-mono font-black uppercase rounded ${
+                                        report.status === 'banned' 
+                                           ? 'bg-red-600 text-white' 
+                                           : report.status === 'resolved'
+                                           ? 'bg-zinc-800 text-zinc-400'
+                                           : 'bg-[#E50914]/20 text-[#E50914]'
+                                     }`}>
+                                        {report.status?.toUpperCase() || 'PENDING'}
+                                     </span>
+                                     <span className="text-[8px] font-mono text-gray-600 uppercase">
+                                        Filed: {report.created_at ? new Date(report.created_at).toLocaleString() : ''}
+                                     </span>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1 font-sans">
+                                     <div>
+                                        <span className="text-[8px] font-mono font-black text-gray-500 block uppercase tracking-widest">Reporter Operator</span>
+                                        <span className="text-xs uppercase font-mono text-white tracking-wider font-bold">
+                                           {reporter?.username || 'Unknown User'} ({reporter?.email || 'N/A'})
+                                        </span>
+                                     </div>
+                                     <div>
+                                        <span className="text-[8px] font-mono font-black text-red-500 block uppercase tracking-widest">Target Misconduct Entity</span>
+                                        <span className="text-xs uppercase font-mono text-red-400 tracking-wider font-black flex items-center gap-1.5">
+                                           <span>{reportedUser?.username || 'Unknown User'} ({reportedUser?.email || 'N/A'})</span>
+                                           {reportedUser?.account_status === 'banned' && (
+                                              <span className="px-1.5 py-0.2 text-[7px] bg-red-600 text-white rounded font-bold uppercase">BANNED</span>
+                                           )}
+                                        </span>
+                                     </div>
+                                  </div>
+
+                                  <div className="bg-black/40 p-4 rounded-xl border border-white/5 space-y-1">
+                                     <span className="text-[8px] font-mono font-black text-gray-500 uppercase block tracking-widest">Violation category: {report.reason}</span>
+                                     <p className="text-xs text-gray-300 font-sans leading-relaxed">{report.details || 'No extended context provided.'}</p>
+                                  </div>
+                               </div>
+
+                               {/* Action Buttons */}
+                               <div className="flex select-none gap-2 shrink-0 md:self-center font-mono">
+                                  {report.status === 'pending' && reportedUser?.account_status !== 'banned' ? (
+                                     <>
+                                        <button
+                                           onClick={async () => {
+                                              if (!confirm(`Are you sure you want to ban user ${reportedUser?.username || 'Target'}?`)) return;
+                                              try {
+                                                 const { error: banErr } = await supabase
+                                                    .from('profiles')
+                                                    .update({ account_status: 'banned' })
+                                                    .eq('id', report.reported_user_id);
+                                                 if (banErr) throw banErr;
+
+                                                 const { error: reportErr } = await supabase
+                                                    .from('reports')
+                                                    .update({ status: 'banned' })
+                                                    .eq('id', report.id);
+                                                 if (reportErr) throw reportErr;
+
+                                                 alert('User account was restricted and report archived successfully.');
+                                                 fetchReports();
+                                                 fetchUsers();
+                                              } catch (err: any) {
+                                                 alert(`Banning operations aborted: ${err.message}`);
+                                              }
+                                           }}
+                                           className="px-4 py-2 bg-[#E50914] text-white hover:bg-red-750 text-[10px] font-black uppercase rounded-lg transition-all border border-red-500/20 shadow-lg font-mono font-black"
+                                        >
+                                           Ban User
+                                        </button>
+                                        <button
+                                           onClick={async () => {
+                                              try {
+                                                 const { error: reportErr } = await supabase
+                                                    .from('reports')
+                                                    .update({ status: 'resolved' })
+                                                    .eq('id', report.id);
+                                                 if (reportErr) throw reportErr;
+
+                                                 alert('Report archived as resolved.');
+                                                 fetchReports();
+                                              } catch (err: any) {
+                                                 alert(`Update failed: ${err.message}`);
+                                              }
+                                           }}
+                                           className="px-4 py-2 bg-zinc-800 text-zinc-300 hover:text-white rounded-lg hover:bg-zinc-750 text-[10px] font-black uppercase transition-all"
+                                        >
+                                           Dismiss
+                                        </button>
+                                     </>
+                                  ) : (
+                                     <div className="text-[9px] text-gray-500 uppercase tracking-widest italic flex items-center gap-1.5 font-bold">
+                                        [Incident Resolved]
+                                        {reportedUser?.account_status === 'banned' && (
+                                           <button
+                                              onClick={async () => {
+                                                 if (!confirm(`Restore and unban user ${reportedUser?.username || 'Target'}?`)) return;
+                                                 try {
+                                                    const { error: unbanErr } = await supabase
+                                                       .from('profiles')
+                                                       .update({ account_status: 'active' })
+                                                       .eq('id', report.reported_user_id);
+                                                    if (unbanErr) throw unbanErr;
+
+                                                    const { error: reportErr } = await supabase
+                                                       .from('reports')
+                                                       .update({ status: 'pending' })
+                                                       .eq('id', report.id);
+                                                    if (reportErr) throw reportErr;
+
+                                                    alert('User credentials restored successfully.');
+                                                    fetchReports();
+                                                    fetchUsers();
+                                                 } catch (err: any) {
+                                                    alert(`Error unbanning: ${err.message}`);
+                                                 }
+                                              }}
+                                              className="px-2 py-1 bg-green-950 text-green-400 hover:text-white border border-green-900 rounded uppercase font-mono text-[8px]"
+                                           >
+                                              Unban
+                                           </button>
+                                        )}
+                                     </div>
+                                  )}
+                               </div>
+                            </div>
+                         );
+                      })}
+                   </div>
+                )}
              </div>
           )}
       </main>

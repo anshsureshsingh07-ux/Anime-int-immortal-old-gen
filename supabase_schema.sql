@@ -320,3 +320,204 @@ CREATE POLICY "Admins can manage all payment transactions" ON payment_transactio
     OR auth.jwt()->>'email' IN ('anshsureshsingh07@gmail.com', 'animeintofficial@gmail.com')
   );
 
+
+-- 16. Alert Profiles Table structure with is_verified column
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_verified BOOLEAN DEFAULT false;
+
+-- Trigger to protect profiles.is_verified from being altered by non-admins
+CREATE OR REPLACE FUNCTION public.check_is_verified_update()
+RETURNS trigger AS $$
+BEGIN
+  IF NEW.is_verified IS DISTINCT FROM OLD.is_verified AND NEW.is_verified = true THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.profiles 
+      WHERE id = auth.uid() AND role = 'admin'
+    ) AND (auth.jwt()->>'email') NOT IN ('anshsureshsingh07@gmail.com', 'animeintofficial@gmail.com') THEN
+      RAISE EXCEPTION 'Unauthorized: Only administrators can toggle verification status.';
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE TRIGGER trg_check_is_verified_update
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW
+  EXECUTE PROCEDURE public.check_is_verified_update();
+
+
+-- 17. Social Chat & Engagement Tables
+CREATE TABLE IF NOT EXISTS conversations (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  title TEXT,
+  is_group BOOLEAN DEFAULT false,
+  theme_color TEXT DEFAULT 'Blue',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS conversation_participants (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(conversation_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  conversation_id UUID REFERENCES conversations(id) ON DELETE CASCADE,
+  sender_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS on Chat structures
+ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
+
+-- 18. Secure Access RLS Policies for Chat channels
+
+-- Participants read access
+CREATE POLICY "Users can select participants of their conversations" ON conversation_participants
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM conversation_participants as cp
+      WHERE cp.conversation_id = conversation_participants.conversation_id
+      AND cp.user_id = auth.uid()
+    )
+  );
+
+-- Participants insert access
+CREATE POLICY "Users can insert participants" ON conversation_participants
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
+
+-- Conversations select access
+CREATE POLICY "Users can view their conversations" ON conversations
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM conversation_participants
+      WHERE conversation_participants.conversation_id = conversations.id
+      AND conversation_participants.user_id = auth.uid()
+    )
+  );
+
+-- Conversations creation access
+CREATE POLICY "Users can create conversations" ON conversations
+  FOR INSERT TO authenticated
+  WITH CHECK (true);
+
+-- Conversation theme updates access
+CREATE POLICY "Users can update their conversations" ON conversations
+  FOR UPDATE TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM conversation_participants
+      WHERE conversation_participants.conversation_id = conversations.id
+      AND conversation_participants.user_id = auth.uid()
+    )
+  );
+
+-- Messages select access
+CREATE POLICY "Users can view messages in their conversations" ON messages
+  FOR SELECT TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM conversation_participants
+      WHERE conversation_participants.conversation_id = messages.conversation_id
+      AND conversation_participants.user_id = auth.uid()
+    )
+  );
+
+-- Messages insert access
+CREATE POLICY "Users can send messages to their conversations" ON messages
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    sender_id = auth.uid() AND
+    EXISTS (
+      SELECT 1 FROM conversation_participants
+      WHERE conversation_participants.conversation_id = messages.conversation_id
+      AND conversation_participants.user_id = auth.uid()
+    )
+  );
+
+
+-- 19. Profiles: Account Status
+ALTER TABLE profiles ADD COLUMN IF NOT EXISTS account_status TEXT DEFAULT 'active' CHECK (account_status IN ('active', 'banned'));
+
+-- 20. Posts Table (Supports both standard posts and reels)
+CREATE TABLE IF NOT EXISTS posts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  content TEXT,
+  media_url TEXT,
+  is_reel BOOLEAN DEFAULT false,
+  likes_count INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS on posts
+ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
+
+-- Posts select access
+CREATE POLICY "Public Posts Access" ON posts
+  FOR SELECT USING (true);
+
+-- Posts insert access
+CREATE POLICY "Authenticated users can create posts" ON posts
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = user_id);
+
+-- Posts delete/update access
+CREATE POLICY "Users can manage own posts" ON posts
+  FOR ALL TO authenticated
+  USING (
+    auth.uid() = user_id OR
+    EXISTS (
+      SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+  );
+
+-- 21. Reports Table for Reporting System
+CREATE TABLE IF NOT EXISTS reports (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  reporter_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
+  reported_user_id UUID REFERENCES profiles(id) ON DELETE CASCADE,
+  reason TEXT NOT NULL,
+  details TEXT,
+  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'resolved', 'banned')),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enable RLS on reports
+ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
+
+-- Reports Select (Authenticated users can see their own reports, admins can see all)
+CREATE POLICY "Users can see own reports" ON reports
+  FOR SELECT TO authenticated
+  USING (
+    reporter_id = auth.uid() OR
+    EXISTS (
+      SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+  );
+
+-- Reports Insert
+CREATE POLICY "Authenticated users can insert reports" ON reports
+  FOR INSERT TO authenticated
+  WITH CHECK (reporter_id = auth.uid());
+
+-- Reports Update (Admins can update reports to resolve/ban)
+CREATE POLICY "Only admins can update reports" ON reports
+  FOR UPDATE TO authenticated
+  USING (
+    EXISTS (
+      SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+    )
+  );
+
+
+
