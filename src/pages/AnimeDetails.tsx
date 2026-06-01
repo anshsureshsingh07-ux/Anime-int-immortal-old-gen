@@ -21,6 +21,7 @@ import {
   getEpisodeNote 
 } from '../lib/watchlist';
 import { getFallbackDetail } from '../lib/jikanFallback';
+import RatingRelay from '../components/RatingRelay';
 
 // Smart local high-fidelity mock character data generator based on titles
 const getMockCharacters = (title: string) => {
@@ -773,6 +774,9 @@ export default function AnimeDetails() {
          {/* Sidebar Column */}
          <div className="col-span-12 lg:col-span-4 space-y-8">
             
+            {/* Neural Rating Relay */}
+            {id && <RatingRelay animeId={id} />}
+
             {/* Where to watch guide container */}
             <div className="bg-[#0b0b0b] border border-white/5 p-6 rounded-2xl shadow-xl relative overflow-hidden">
                <div className="absolute top-0 right-0 w-24 h-24 bg-red-600/5 rounded-full blur-xl" />

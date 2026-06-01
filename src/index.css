@@ -1,8 +1,10 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@355;400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --color-crimson: #E50914;
 }
 
 @keyframes marquee {
@@ -157,6 +159,142 @@ body {
 
 .animate-neon-glow {
   animation: neon-glow 2.5s ease-in-out infinite;
+}
+
+/* Neural-Sync Glassmorphism */
+.neural-glass {
+  background: rgba(8, 8, 12, 0.5) !important;
+  backdrop-filter: blur(20px) saturate(180%) !important;
+  border: 0.5px solid rgba(255, 255, 255, 0.07) !important;
+  box-shadow: 
+    0 10px 40px rgba(0, 0, 0, 0.65),
+    inset 0 1px 1.5px rgba(255, 255, 255, 0.05) !important;
+}
+
+/* Chromatic Aberration aesthetic styling */
+.chromatic-aberration {
+  filter: drop-shadow(2px 0 0 rgba(255, 0, 20, 0.55)) drop-shadow(-2px 0 0 rgba(0, 240, 255, 0.55)) !important;
+}
+
+/* Premium Command Inputs */
+.premium-input, input[type="text"], input[type="search"], input[type="number"], input[type="password"], input[type="email"], textarea {
+  background: rgba(4, 4, 6, 0.8) !important;
+  border: 0.5px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 12px !important;
+  font-family: var(--font-mono) !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.premium-input:focus, input[type="text"]:focus, input[type="search"]:focus, input[type="number"]:focus, input[type="password"]:focus, input[type="email"]:focus, textarea:focus {
+  border-color: #E50914 !important;
+  background-color: rgba(229, 9, 20, 0.02) !important;
+  box-shadow: 0 0 15px rgba(229, 9, 20, 0.45) !important;
+  color: #ffffff !important;
+  outline: none !important;
+}
+
+/* Waiting state terminal placeholder */
+input:focus::placeholder, textarea:focus::placeholder {
+  color: rgba(229, 9, 20, 0.7) !important;
+  font-family: var(--font-mono) !important;
+  content: ">_ INPUT_COMMAND" !important;
+  opacity: 0.85 !important;
+}
+
+/* Crimson Hover-Pulse */
+.hover-pulse {
+  transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1) !important;
+}
+
+.hover-pulse:hover {
+  transform: translateY(-2.5px) scale(1.01) !important;
+  border-color: #E50914 !important;
+  box-shadow: 0 0 24px rgba(229, 9, 20, 0.4), inset 0 0 10px rgba(229, 9, 20, 0.15) !important;
+}
+
+/* Specific button pulse glow */
+button.hover-pulse:hover, a.hover-pulse:hover {
+  background-color: rgba(229, 9, 20, 0.1) !important;
+  box-shadow: 0 0 25px rgba(229, 9, 20, 0.5), inset 0 0 12px rgba(229, 9, 20, 0.15) !important;
+}
+
+/* Digital Industrialism Custom Hardware Styles */
+.bg-carbon {
+  background-color: #010102 !important;
+  background-image: 
+    linear-gradient(45deg, #07070a 25%, transparent 25%), 
+    linear-gradient(-45deg, #07070a 25%, transparent 25%), 
+    linear-gradient(45deg, transparent 75%, #07070a 75%), 
+    linear-gradient(-45deg, transparent 75%, #07070a 75%) !important;
+  background-size: 10px 10px !important;
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0px !important;
+}
+
+.aluminum-frame {
+  border: 1px solid #1c1c24 !important;
+  background: linear-gradient(135deg, #060608 0%, #0c0c10 100%) !important;
+  box-shadow: 
+    inset 0 1.5px 0.5px rgba(255,255,255,0.06), 
+    0 10px 30px rgba(0,0,0,0.85),
+    inset 0 -1px 2px rgba(0,0,0,0.8) !important;
+}
+
+.emissive-crimson {
+  position: relative;
+  border-color: rgba(229, 9, 20, 0.45) !important;
+  box-shadow: 
+    0 0 30px rgba(229, 9, 20, 0.22),
+    inset 0 0 12px rgba(229, 9, 20, 0.12),
+    0 15px 45px rgba(0, 0, 0, 0.9) !important;
+}
+
+.chromatic-text {
+  text-shadow: 
+    -0.8px -0.8px 0.5px rgba(229, 9, 20, 0.75), 
+    0.8px 0.8px 0.5px rgba(0, 191, 255, 0.5) !important;
+  letter-spacing: 0.05em;
+}
+
+.tactile-button {
+  position: relative;
+  background: linear-gradient(180deg, #181822 0%, #0b0b0f 100%) !important;
+  border: 1px solid #282834 !important;
+  border-bottom: 3.5px solid #14141c !important;
+  border-radius: 8px !important;
+  box-shadow: 
+    0 5px 8px rgba(0,0,0,0.6),
+    inset 0 1px 0 rgba(255,255,255,0.08) !important;
+  font-family: var(--font-mono);
+  transition: all 0.12s cubic-bezier(0.25, 0.8, 0.25, 1) !important;
+}
+
+.tactile-button:hover {
+  border-color: #E50914 !important;
+  color: #fff !important;
+  box-shadow: 
+    0 5px 15px rgba(229, 9, 20, 0.35),
+    inset 0 1px 0 rgba(255,255,255,0.1) !important;
+}
+
+.tactile-button:active {
+  transform: translateY(2px.5) !important;
+  border-bottom: 1.5px solid #14141c !important;
+  box-shadow: 
+    0 1px 2px rgba(0,0,0,0.8),
+    inset 0 2px 6px rgba(0,0,0,0.95),
+    0 0 10px rgba(229,9,20,0.2) !important;
+}
+
+.plexiglass {
+  background: linear-gradient(135deg, rgba(8, 8, 12, 0.6) 0%, rgba(2, 2, 4, 0.88) 100%) !important;
+  backdrop-filter: blur(28px) saturate(220%) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.09) !important;
+  border-top-color: rgba(255,255,255,0.18) !important;
+  border-left-color: rgba(255,255,255,0.14) !important;
+  box-shadow: 
+    0 25px 60px rgba(0, 0, 0, 0.9),
+    inset 0 1px 2px rgba(255, 255, 255, 0.06),
+    inset 0 -1.5px 3px rgba(0, 0, 0, 0.6) !important;
 }
 
 

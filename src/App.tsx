@@ -1,4 +1,6 @@
 import { useState, useEffect, createContext, useContext } from 'react';
+import { ThemeEngineProvider, useThemeEngine } from './context/ThemeEngineContext';
+import { playDigitalSound } from './lib/sounds';
 import { 
   BrowserRouter as Router, 
   Routes, 
@@ -29,7 +31,21 @@ import {
   ArrowLeft,
   Upload,
   Landmark,
-  MessageSquare
+  MessageSquare,
+  ShieldAlert,
+  Terminal,
+  Library,
+  Compass,
+  Swords,
+  Coins,
+  Award,
+  Calendar,
+  Radio,
+  Target,
+  Settings2,
+  Archive,
+  Cpu,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
@@ -38,9 +54,27 @@ import Leaderboard from './pages/Leaderboard';
 import { Navigate } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, registerPushNotifications } from './lib/firebase';
+import { CommandPalette } from './components/CommandPalette';
 
 // Pages
 import Home from './pages/Home';
+import Archives from './pages/Archives';
+import NeuralMaps from './pages/NeuralMaps';
+import FactionWar from './pages/FactionWar';
+import Marketplace from './pages/Marketplace';
+import SkillTree from './pages/SkillTree';
+import EventHorizon from './pages/EventHorizon';
+import DataRelay from './pages/DataRelay';
+import SquadOps from './pages/SquadOps';
+import TerminalLogs from './pages/TerminalLogs';
+import NodeSettings from './pages/NodeSettings';
+
+// God-Level Mainframe Pages
+import CoreProcessingUnit from './pages/CoreProcessingUnit';
+import SectorTacticalMaps from './pages/SectorTacticalMaps';
+import ArchivesIntelHub from './pages/ArchivesIntelHub';
+import NexusTreasury from './pages/NexusTreasury';
+import VanguardCommand from './pages/VanguardCommand';
 
 const getFactionEmoji = (name?: string) => {
   if (!name) return '🔰';
@@ -473,7 +507,11 @@ export function useNews() {
 
 function AppLayout({ children }: { children: React.ReactNode }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [extendedNavOpen, setExtendedNavOpen] = useState(() => {
+    return localStorage.getItem('vanguard_extended_nav_open') === 'true';
+  });
   const [firebaseUser, setFirebaseUser] = useState<any>(null);
+  const [isGuest, setIsGuest] = useState(() => localStorage.getItem('vanguard_guest_session') === 'true');
   const isActualAdmin = firebaseUser && firebaseUser.email === 'anshsureshsingh07@gmail.com';
   const [supabaseSession, setSupabaseSession] = useState<any>(null);
   const [dbUser, setDbUser] = useState<any>(null);
@@ -485,6 +523,103 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const [isStarkSummer, setIsStarkSummer] = useState(() => localStorage.getItem('stark_summer_active') === 'true');
   const [loadingAuth, setLoadingAuth] = useState(true);
   const location = useLocation();
+
+  // Void Descent Cinematic Entry states
+  const [descentState, setDescentState] = useState<'flash' | 'descending' | 'settled'>('flash');
+  const [flashOpacity, setFlashOpacity] = useState(1);
+  const [dustParticles, setDustParticles] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (!loadingAuth) {
+      // Allocate randomized dust vectors
+      const generated = Array.from({ length: 30 }).map((_, i) => ({
+        id: i,
+        left: `${Math.random() * 100}%`,
+        top: `${Math.random() * 100}%`,
+        duration: 2.5 + Math.random() * 3.5,
+        size: Math.random() > 0.6 ? '1.5px' : '1px',
+        opacity: 0.15 + Math.random() * 0.45,
+        delay: Math.random() * 1.5,
+      }));
+      setDustParticles(generated);
+
+      // Flash hold 100ms, then quick fade out
+      const flashTimer = setTimeout(() => {
+        setFlashOpacity(0);
+      }, 100);
+
+      const startDescentTimer = setTimeout(() => {
+        setDescentState('descending');
+      }, 250);
+
+      const finishDescentTimer = setTimeout(() => {
+        setDescentState('settled');
+        playDigitalSound('ping');
+      }, 2400);
+
+      return () => {
+        clearTimeout(flashTimer);
+        clearTimeout(startDescentTimer);
+        clearTimeout(finishDescentTimer);
+      };
+    }
+  }, [loadingAuth]);
+
+  // Play digital whir on page transition
+  useEffect(() => {
+    playDigitalSound('whir');
+  }, [location.pathname]);
+
+  // Mainframe security overlay status and inactivity standby states
+  const [securityGlitch, setSecurityGlitch] = useState(false);
+  const [isInactive, setIsInactive] = useState(false);
+  const [securityPingCount, setSecurityPingCount] = useState(0);
+
+  // Periodic security glitch trigger
+  useEffect(() => {
+    const triggerGlitch = () => {
+      setSecurityGlitch(true);
+      setTimeout(() => {
+        setSecurityGlitch(false);
+      }, 550); // Glitch lasts 550ms
+    };
+
+    const interval = setInterval(() => {
+      // 35% chance to glitch every 8 seconds
+      if (Math.random() < 0.35) {
+        triggerGlitch();
+      }
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  // Idle Standby Controller (Dims screen upon 40 seconds of absolute zero activity)
+  useEffect(() => {
+    let idleTimer: any;
+    const resetIdleTimer = () => {
+      setIsInactive(false);
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => {
+        setIsInactive(true);
+      }, 40000); 
+    };
+
+    window.addEventListener('mousemove', resetIdleTimer);
+    window.addEventListener('keydown', resetIdleTimer);
+    window.addEventListener('scroll', resetIdleTimer, { passive: true });
+    window.addEventListener('click', resetIdleTimer);
+
+    resetIdleTimer();
+
+    return () => {
+      clearTimeout(idleTimer);
+      window.removeEventListener('mousemove', resetIdleTimer);
+      window.removeEventListener('keydown', resetIdleTimer);
+      window.removeEventListener('scroll', resetIdleTimer);
+      window.removeEventListener('click', resetIdleTimer);
+    };
+  }, []);
 
   // News global states
   const [activeArticle, setActiveArticle] = useState<any | null>(null);
@@ -689,6 +824,16 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       console.error('Error deleting release_tracker:', err);
     }
   };
+
+  useEffect(() => {
+    const handleGuestSync = () => {
+      setIsGuest(localStorage.getItem('vanguard_guest_session') === 'true');
+    };
+    window.addEventListener('guest-login-sync', handleGuestSync);
+    return () => {
+      window.removeEventListener('guest-login-sync', handleGuestSync);
+    };
+  }, []);
 
   useEffect(() => {
     // Firebase auth listener
@@ -948,6 +1093,8 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   };
 
   const handleSignOut = async () => {
+    localStorage.removeItem('vanguard_guest_session');
+    setIsGuest(false);
     await signOut(auth);
     await supabase.auth.signOut();
     setDbUser(null);
@@ -959,7 +1106,12 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     email: firebaseUser.email,
     username: dbUser?.username || firebaseUser.email?.split('@')[0],
     imageUrl: dbUser?.avatar_url || dbUser?.avatar || (firebaseUser ? localStorage.getItem('cached_avatar_url_' + firebaseUser.uid) : null) || `https://api.dicebear.com/7.x/avataaars/svg?seed=${firebaseUser.uid}`
-  } : null;
+  } : (isGuest ? {
+    id: 'guest_node_99',
+    email: 'guest@nexus.secure',
+    username: 'GUEST_NODE_99',
+    imageUrl: `https://api.dicebear.com/7.x/avataaars/svg?seed=guest_node_99`
+  } : null);
 
   const ext = user ? getStoredProfileExt(user.id) : { xp: 0, level: 1, is_premium: false };
   let currentDbUser = dbUser 
@@ -971,7 +1123,10 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         tier: dbUser.is_premium ? 'premium' : 'none' 
       }
     : (user ? { 
-        role: 'member', 
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: isGuest ? 'Guest' : 'member', 
         xp: ext.xp, 
         level: ext.level, 
         is_premium: false, 
@@ -1078,14 +1233,49 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     setIsSidebarOpen(false);
   }, [location.pathname]);
 
-  const navItems = [
-    { name: 'Home Feed', path: '/', icon: HomeIcon },
-    { name: 'Database', path: '/database', icon: DatabaseIcon },
-    { name: 'Neural News', path: '/news', icon: FileText },
-    { name: 'Elite Leaderboard', path: '/leaderboard', icon: Trophy },
-    { name: '🏦 HOUSE TREASURY', path: '/house-treasury', icon: Landmark },
-    { name: 'Recruitment', path: '/recruit', icon: RecruitIcon },
-    { name: 'Profile Node', path: '/profile', icon: User },
+  const navSections = [
+    {
+      title: 'Operations',
+      items: [
+        { name: 'Home Feed', path: '/', icon: HomeIcon },
+        { name: 'Squad Ops', path: '/squad-ops', icon: Target },
+        { name: 'Faction War', path: '/faction-war', icon: Swords },
+        { name: 'Marketplace', path: '/marketplace', icon: Coins },
+        { name: 'Data Relay', path: '/data-relay', icon: Radio },
+        { name: 'Elite Leaderboard', path: '/leaderboard', icon: Trophy },
+        { name: '🏦 HOUSE TREASURY', path: '/house-treasury', icon: Landmark },
+        { name: 'Recruitment', path: '/recruit', icon: RecruitIcon }
+      ]
+    },
+    {
+      title: 'Data',
+      items: [
+        { name: 'Database', path: '/database', icon: DatabaseIcon },
+        { name: 'Neural News', path: '/news', icon: FileText },
+        { name: 'Archives', path: '/archives', icon: Library },
+        { name: 'Neural Maps', path: '/neural-maps', icon: Compass },
+        { name: 'Skill Tree', path: '/skill-tree', icon: Award },
+        { name: 'Event Horizon', path: '/event-horizon', icon: Calendar }
+      ]
+    },
+    {
+      title: 'Mainframe Cores',
+      items: [
+        { name: 'Core Processing Unit', path: '/core-processing-unit', icon: Cpu },
+        { name: 'Sector Tactical Maps', path: '/sector-tactical-maps', icon: Compass },
+        { name: 'Archives & Intel Hub', path: '/archives-intel', icon: Archive },
+        { name: 'Nexus Treasury & Ledger', path: '/nexus-treasury', icon: Landmark },
+        { name: 'Vanguard Command Center', path: '/vanguard-command', icon: ShieldAlert }
+      ]
+    },
+    {
+      title: 'Settings',
+      items: [
+        { name: 'Profile Node', path: '/profile', icon: User },
+        { name: 'Terminal Logs', path: '/terminal-logs', icon: Terminal },
+        { name: 'Node Settings', path: '/node-settings', icon: Settings2 }
+      ]
+    }
   ];
 
   const isAdmin = (currentDbUser && (currentDbUser.role === 'admin' || currentDbUser.role === 'news_writer' || currentDbUser.role === 'moderator')) || 
@@ -1103,11 +1293,11 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (!firebaseUser && !isAuthRoute) {
+  if (!firebaseUser && !isGuest && !isAuthRoute) {
     return <AuthPage />;
   }
 
-  if (isAuthRoute && firebaseUser && location.pathname !== '/auth/reset-password') {
+  if (isAuthRoute && (firebaseUser || isGuest) && location.pathname !== '/auth/reset-password') {
     return <Navigate to="/" replace />;
   }
 
@@ -1124,9 +1314,190 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <NewsContext.Provider value={{ activeArticle, setActiveArticle, breakingNews, setBreakingNews }}>
-      <div className={`flex min-h-screen w-full overflow-y-auto bg-background pb-12 bg-[var(--faction-bg)] text-gray-200 transition-all duration-700 ease-in-out ${hasSolarState ? 'animate-solar-radiation' : ''}`}>
+      <motion.div 
+        animate={descentState !== 'flash' ? {
+          perspective: '2000px'
+        } : {
+          perspective: '500px'
+        }}
+        transition={{
+          perspective: {
+            type: "spring",
+            stiffness: 80,
+            damping: 15,
+            mass: 1.1
+          }
+        }}
+        style={{ transformStyle: 'preserve-3d' }}
+        className="bg-[#030105] text-gray-200 min-h-screen w-full relative overflow-hidden flex flex-col justify-start"
+      >
+        <CommandPalette />
+
+        {/* White overexposed flash / Void blackout fade overlay */}
+        {flashOpacity > 0 && (
+          <div 
+            className="fixed inset-0 bg-white z-[999999] pointer-events-none transition-opacity duration-300 ease-out"
+            style={{ opacity: flashOpacity }}
+          />
+        )}
+
+        {/* Atmospheric Floating Dust Overlay during descent */}
+        {descentState !== 'settled' && (
+          <div className="absolute inset-0 overflow-hidden pointer-events-none z-[99998] bg-[#030105]">
+            {dustParticles.map(p => (
+              <motion.div
+                key={p.id}
+                className="absolute bg-white rounded-full"
+                style={{
+                  left: p.left,
+                  top: p.top,
+                  width: p.size,
+                  height: p.size,
+                  opacity: p.opacity,
+                }}
+                animate={{
+                  y: ['100vh', '-20vh'],
+                }}
+                transition={{
+                  duration: p.duration,
+                  repeat: Infinity,
+                  ease: "linear",
+                  delay: p.delay
+                }}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Main application body with translated Z-axis */}
+        <motion.div
+          initial={{
+            z: -1000,
+            opacity: 0,
+            filter: 'blur(20px)'
+          }}
+          animate={descentState !== 'flash' ? {
+            z: 0,
+            opacity: 1,
+            filter: 'blur(0px)'
+          } : {
+            z: -1000,
+            opacity: 0,
+            filter: 'blur(20px)'
+          }}
+          transition={{
+            z: {
+              type: "spring",
+              stiffness: 80,
+              damping: 15,
+              mass: 1.15,
+              restDelta: 0.001
+            },
+            filter: {
+              duration: 1.7,
+              ease: "easeOut"
+            },
+            opacity: {
+              duration: 0.8,
+              ease: "easeOut"
+            }
+          }}
+          style={{ transformStyle: 'preserve-3d' }}
+          className={`flex-1 flex min-h-screen w-full overflow-y-auto bg-background pb-12 bg-[var(--faction-bg)] text-gray-200 transition-all duration-700 ease-in-out ${hasSolarState ? 'animate-solar-radiation' : ''}`}
+        >
       <style dangerouslySetInnerHTML={{ __html: getFactionStyleCSS(currentUserFaction?.faction_name, isStarkSummer) }} />
       <SolarFlareOverlay active={hasSolarState} />
+
+      {/* Eco Standby Inactivity Dimmer overlay */}
+      <AnimatePresence>
+        {isInactive && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-[#030105]/98 backdrop-blur-[16px] z-[9999] flex flex-col items-center justify-center pointer-events-auto cursor-pointer"
+            onClick={() => setIsInactive(false)}
+          >
+            {/* Tech grid mesh overlay */}
+            <div className="absolute inset-0 bg-[linear-gradient(rgba(18,16,16,0)_50%,rgba(0,0,0,0.15)_50%),linear-gradient(90deg,rgba(168,85,247,0.015),rgba(0,0,0,0.1),rgba(168,85,247,0.015))] bg-[size:100%_4px,3px_100%] opacity-40 pointer-events-none" />
+            
+            <div className="flex flex-col items-center animate-pulse duration-1000 max-w-xs text-center px-6">
+              <div className="w-16 h-16 rounded-full border border-red-500/30 flex items-center justify-center mb-6">
+                <ShieldAlert size={28} className="text-[#E50914] animate-bounce" />
+              </div>
+              <h2 className="text-lg font-mono font-black text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-[#A855F7] to-[#00BFFF] uppercase tracking-[0.4em]">
+                STANDBY MODE
+              </h2>
+              <p className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest mt-3 leading-relaxed">
+                Terminal synced to deep-sleep protocol.<br />
+                <span className="text-white font-bold animate-pulse mt-2 inline-block">MOVE POINTER TO RE-AUTHENTICATE</span>
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Mainframe Security Widget HUD */}
+      <motion.div 
+        drag
+        dragConstraints={{ left: -500, right: 0, top: -500, bottom: 0 }}
+        style={{ 
+          filter: securityGlitch ? 'skewX(-15deg) saturate(2.5) hue-rotate(75deg) blur(0.4px)' : 'none',
+          touchAction: 'none'
+        }}
+        className="fixed bottom-14 right-6 z-40 w-64 bg-[#08040d]/95 backdrop-blur-md border border-purple-500/30 shadow-[0_0_30px_rgba(168,85,247,0.25)] p-4 rounded-2xl flex flex-col gap-3 select-none transition-all duration-300 pointer-events-auto cursor-grab active:cursor-grabbing"
+      >
+        {/* Engineering micro-labels */}
+        <div className="absolute top-1.5 right-3 text-[6px] font-mono text-zinc-500 select-none pointer-events-none uppercase">
+          SECURE_NODE_HUD_V2
+        </div>
+
+        <div className="flex items-center gap-2 border-b border-white/5 pb-2">
+          <ShieldAlert size={14} className="text-[#E50914]" />
+          <div className="flex-1">
+            <h4 className="text-[9px] font-mono font-black text-[#F2F2F5] uppercase tracking-widest leading-none">MAINFRAME CONTROL</h4>
+            <span className="text-[7px] font-mono text-zinc-500 uppercase tracking-widest leading-none mt-1 block">SYS_SECURITY_INTEGRITY</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-1.5 py-0.5 bg-green-500/10 border border-green-500/30 rounded text-green-500 text-[8px] font-mono">
+            <span className="w-1 h-1 rounded-full bg-green-500 animate-pulse" /> ONLINE
+          </div>
+        </div>
+
+        {/* Telemetry data streams */}
+        <div className="flex flex-col gap-1.5 font-mono text-[8px] text-[#A8A8B2] border-b border-white/5 pb-2">
+          <div className="flex justify-between">
+            <span>SYSTEM_STATUS:</span>
+            <span className="text-white font-black uppercase">CORE_ACTIVE_99</span>
+          </div>
+          <div className="flex justify-between">
+            <span>CONNECTION:</span>
+            <span className="text-[#00BFFF] font-black uppercase">NEX-SECURE-SSH</span>
+          </div>
+          <div className="flex justify-between">
+            <span>AUTH_LEVEL:</span>
+            <span className="text-[#A855F7] font-black uppercase">VANGUARD_LEVEL_9</span>
+          </div>
+          <div className="flex justify-between">
+            <span>PIN_PULSES:</span>
+            <span className="text-amber-400 font-bold">{securityPingCount} SEC_OKs</span>
+          </div>
+        </div>
+
+        {/* Depress button for tactile feedback */}
+        <button 
+          type="button"
+          onClick={() => {
+            setSecurityPingCount(prev => prev + 1);
+            if (navigator?.vibrate) {
+              navigator.vibrate(15);
+            }
+          }}
+          className="w-full relative py-2 px-3 rounded-lg border border-red-500/40 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white text-[8px] font-mono font-black uppercase tracking-widest transition-all duration-150 active:translate-y-0.5 active:shadow-[inset_0_2px_4px_rgba(0,0,0,0.9)] hover:shadow-[0_0_12px_rgba(229,9,20,0.5)] shadow-[0_1px_3px_rgba(0,0,0,0.4)]"
+        >
+          Ping Security Firewall
+        </button>
+      </motion.div>
+
       {/* Sidebar Overlay for Mobile */}
       {isSidebarOpen && (
         <div 
@@ -1158,39 +1529,116 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           </button>
         </div>
 
-        <nav className="flex-1 px-4 space-y-1 mt-4 overflow-y-auto">
-          <div className="text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-3 px-2">Navigation</div>
-          {navItems.map((item) => (
-            <Link 
-              key={item.path}
-              to={item.path}
-              className={`flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-all ${
-                location.pathname === item.path 
-                  ? 'bg-[#1A1A1A] border-l-2 border-[var(--faction-primary)] text-white' 
-                  : 'text-gray-400 hover:bg-[#111] hover:text-white'
-              }`}
+        <nav className="flex-1 px-4 mt-4 overflow-y-auto font-mono scrollbar-thin flex flex-col gap-5">
+          {/* Core Links */}
+          <div className="space-y-1">
+            <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-extrabold mb-1.5 px-2 select-none">
+              Core Systems
+            </div>
+            <div className="flex flex-col gap-0.5">
+              {[
+                { name: 'Home Feed', path: '/', icon: HomeIcon },
+                { name: 'Sector Tactical Maps', path: '/sector-tactical-maps', icon: Compass },
+                { name: 'Nexus Treasury & Ledger', path: '/nexus-treasury', icon: Landmark },
+                { name: 'Vanguard Command Center', path: '/vanguard-command', icon: ShieldAlert },
+                { name: 'Node Settings', path: '/node-settings', icon: Settings2 }
+              ].map((item) => (
+                <Link 
+                  key={item.path}
+                  to={item.path}
+                  className={`flex items-center gap-3 px-3 py-1.5 text-xs font-bold rounded-lg transition-all hover-pulse ${
+                    location.pathname === item.path 
+                      ? 'bg-black/40 border border-crimson text-white shadow-[0_0_15px_rgba(229,9,20,0.3)]' 
+                      : 'text-gray-400 hover:text-white border border-transparent hover:border-crimson/50'
+                  }`}
+                >
+                  <item.icon size={15} className={location.pathname === item.path ? 'text-crimson' : 'text-gray-500'} />
+                  {item.name}
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {/* Extended Modes Toggle */}
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                const nextState = !extendedNavOpen;
+                setExtendedNavOpen(nextState);
+                localStorage.setItem('vanguard_extended_nav_open', nextState.toString());
+                playDigitalSound('click');
+              }}
+              className="w-full text-left flex items-center justify-between px-3 py-2 text-[10px] font-mono font-bold uppercase tracking-wider text-zinc-400 hover:text-white border border-white/5 bg-white/5 hover:bg-white/10 rounded-lg transition-all cursor-pointer"
             >
-              <item.icon size={18} />
-              {item.name}
-            </Link>
-          ))}
-          
-          {isAdmin && (
-            <>
-              <div className="pt-8 text-[10px] uppercase tracking-widest text-gray-500 font-bold mb-3 px-2">Management</div>
-              <Link 
-                to="/admin"
-                className={`flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-md transition-all ${
-                  location.pathname === '/admin' 
-                    ? 'bg-[#1A1A1A] border-l-2 border-[var(--faction-primary)] text-white' 
-                    : 'text-gray-400 hover:bg-[#111] hover:text-white'
-                }`}
-              >
-                <AdminIcon size={18} />
-                Admin Panel
-              </Link>
-            </>
-          )}
+              <span>[EXTENDED_MODES]</span>
+              <ChevronDown 
+                size={14} 
+                className={`transform transition-transform duration-300 ${extendedNavOpen ? 'rotate-180' : 'rotate-0'}`} 
+              />
+            </button>
+
+            <AnimatePresence initial={false}>
+              {extendedNavOpen && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.25, ease: "easeInOut" }}
+                  className="overflow-hidden"
+                >
+                  <div className="pt-4 flex flex-col gap-5">
+                    {navSections.map((section) => {
+                      const filteredItems = section.items.filter(
+                        (item) => !['/', '/sector-tactical-maps', '/nexus-treasury', '/vanguard-command', '/node-settings'].includes(item.path)
+                      );
+                      if (filteredItems.length === 0) return null;
+                      return (
+                        <div key={section.title} className="space-y-1">
+                          <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-extrabold mb-1.5 px-2 select-none">
+                            {section.title}
+                          </div>
+                          <div className="flex flex-col gap-0.5">
+                            {filteredItems.map((item) => (
+                              <Link 
+                                key={item.path}
+                                to={item.path}
+                                className={`flex items-center gap-3 px-3 py-1.5 text-xs font-bold rounded-lg transition-all hover-pulse ${
+                                  location.pathname === item.path 
+                                    ? 'bg-black/40 border border-crimson text-white shadow-[0_0_15px_rgba(229,9,20,0.3)]' 
+                                    : 'text-gray-400 hover:text-white border border-transparent hover:border-crimson/50'
+                                }`}
+                              >
+                                <item.icon size={15} className={location.pathname === item.path ? 'text-crimson' : 'text-gray-500'} />
+                                {item.name}
+                              </Link>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                    
+                    {isAdmin && (
+                      <div className="space-y-1 pt-1">
+                        <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-extrabold mb-1.5 px-2 select-none">Management</div>
+                        <Link 
+                          to="/admin"
+                          className={`flex items-center gap-3 px-3 py-1.5 text-xs font-bold rounded-lg transition-all hover-pulse ${
+                            location.pathname === '/admin' 
+                              ? 'bg-black/40 border border-crimson text-white shadow-[0_0_15px_rgba(229,9,20,0.3)]' 
+                              : 'text-gray-400 hover:text-white border border-transparent hover:border-crimson/50'
+                          }`}
+                        >
+                          <AdminIcon size={15} className="text-gray-500" />
+                          Admin Panel
+                        </Link>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </nav>
 
         <div className="p-4 border-t border-[var(--faction-border)] space-y-3">
@@ -1243,6 +1691,12 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             >
               <Menu size={24} />
             </button>
+            
+            {isGuest && (
+              <span className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-3 py-1 rounded-full font-mono font-black uppercase tracking-widest select-none animate-pulse shrink-0">
+                [STATUS: GUEST]
+              </span>
+            )}
             
             <div className="relative w-64 xl:w-96 hidden md:block">
               <input 
@@ -1314,7 +1768,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto custom-scrollbar relative">
+        <main className="flex-1 overflow-y-auto custom-scrollbar relative z-10">
           {/* Headline Frame Component */}
           <div className="bg-[#050508]/90 border-b border-[var(--faction-border)] py-2 px-6 lg:px-8 flex items-center gap-4 overflow-hidden select-none shrink-0 z-10 sticky top-0 backdrop-blur-md">
             <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-600/10 border border-red-500/30 rounded text-red-500 text-[9px] font-black uppercase tracking-widest shrink-0 animate-pulse">
@@ -1371,6 +1825,12 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             </motion.div>
           </div>
           <div className="ml-4 flex gap-4 items-center shrink-0">
+            {descentState === 'settled' && (
+              <div className="hidden md:flex items-center gap-3 text-[9px] font-mono font-black text-emerald-500 tracking-wider animate-fade-in">
+                <span className="bg-emerald-500/5 px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold">[MAIN_SYSTEMS: ONLINE]</span>
+                <span className="bg-cyan-500/5 text-cyan-400 px-1.5 py-0.5 rounded border border-cyan-500/20 font-bold">[NEURAL_SYNC: COMPLETE]</span>
+              </div>
+            )}
             <div className="flex items-center gap-1.5 border-l border-[var(--faction-border)] pl-4">
               <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
               <span className="text-[10px] font-bold text-white uppercase tracking-widest">System Optimal</span>
@@ -1981,32 +2441,52 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           )}
         </AnimatePresence>
-      </div>
-    </div>
+        </div>
+        </motion.div>
+      </motion.div>
     </NewsContext.Provider>
   );
 }
 
 export default function App() {
   return (
-    <Router>
-      <AppLayout>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/auth" element={<AuthPage />} />
-          <Route path="/auth/reset-password" element={<ResetPassword />} />
-          <Route path="/database" element={<AnimeDatabase />} />
-          <Route path="/news" element={<News />} />
-          <Route path="/news/:id" element={<NewsDetail />} />
-          <Route path="/profile" element={<Profile />} />
-          <Route path="/leaderboard" element={<Leaderboard />} />
-          <Route path="/house-treasury" element={<HouseCards />} />
-          <Route path="/anime/:id" element={<AnimeDetails />} />
-          <Route path="/recruit" element={<Recruitment />} />
-          <Route path="/admin" element={<Admin />} />
-          <Route path="/legal" element={<LegalPage />} />
-        </Routes>
-      </AppLayout>
-    </Router>
+    <ThemeEngineProvider>
+      <Router>
+        <AppLayout>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/auth/reset-password" element={<ResetPassword />} />
+            <Route path="/database" element={<AnimeDatabase />} />
+            <Route path="/news" element={<News />} />
+            <Route path="/news/:id" element={<NewsDetail />} />
+            <Route path="/profile" element={<Profile />} />
+            <Route path="/leaderboard" element={<Leaderboard />} />
+            <Route path="/house-treasury" element={<HouseCards />} />
+            <Route path="/anime/:id" element={<AnimeDetails />} />
+            <Route path="/recruit" element={<Recruitment />} />
+            <Route path="/admin" element={<Admin />} />
+            <Route path="/legal" element={<LegalPage />} />
+            <Route path="/archives" element={<Archives />} />
+            <Route path="/neural-maps" element={<NeuralMaps />} />
+            <Route path="/faction-war" element={<FactionWar />} />
+            <Route path="/marketplace" element={<Marketplace />} />
+            <Route path="/skill-tree" element={<SkillTree />} />
+            <Route path="/event-horizon" element={<EventHorizon />} />
+            <Route path="/data-relay" element={<DataRelay />} />
+            <Route path="/squad-ops" element={<SquadOps />} />
+            <Route path="/terminal-logs" element={<TerminalLogs />} />
+            <Route path="/node-settings" element={<NodeSettings />} />
+            
+            {/* God-Level Mainframe Routes */}
+            <Route path="/core-processing-unit" element={<CoreProcessingUnit />} />
+            <Route path="/sector-tactical-maps" element={<SectorTacticalMaps />} />
+            <Route path="/archives-intel" element={<ArchivesIntelHub />} />
+            <Route path="/nexus-treasury" element={<NexusTreasury />} />
+            <Route path="/vanguard-command" element={<VanguardCommand />} />
+          </Routes>
+        </AppLayout>
+      </Router>
+    </ThemeEngineProvider>
   );
 }

@@ -1008,6 +1008,9 @@ export default function Profile() {
               <span className="text-[10px] font-mono text-red-500 uppercase tracking-widest px-3 py-1 bg-red-500/5 rounded-full border border-red-500/10">
                 Node ID: {profile?.id?.slice(0, 8) || 'GENERIC'}
               </span>
+              <span className="text-[10px] font-mono text-amber-500 uppercase tracking-widest px-3 py-1 bg-amber-500/5 rounded-full border border-amber-500/10 transition-all">
+                TERMINAL: {localStorage.getItem('vanguard_detected_device') || '[HARDWARE: VANGUARD_LINK_GENERIC_TERMINAL]'}
+              </span>
             </div>
 
             {/* Animated XP Progress Bar */}
