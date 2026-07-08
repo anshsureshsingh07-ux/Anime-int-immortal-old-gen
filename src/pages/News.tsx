@@ -3,6 +3,7 @@ import { motion } from 'motion/react';
 import { Calendar, User, ArrowLeft, Clock, Search, Filter } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { generateInternalLink } from '../utils/urlFormatter';
 
 export default function News() {
   const [news, setNews] = useState<any[]>([]);
@@ -29,6 +30,10 @@ export default function News() {
   };
 
   const filteredNews = news.filter(item => {
+    // Hide future scheduled items from the standard feed until released
+    if (new Date(item.created_at) > new Date()) {
+      return false;
+    }
     const matchesSearch = item.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           item.description.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesCategory = activeCategory === 'All' || item.category === activeCategory;
@@ -100,7 +105,7 @@ export default function News() {
               transition={{ delay: idx * 0.05 }}
               className="group"
             >
-              <Link to={`/news/${item.id}`}>
+              <a href={generateInternalLink(item.id)}>
                 <div className="relative aspect-video rounded-[2rem] overflow-hidden border border-white/5 bg-[#0a0a0a] group-hover:border-red-600/50 transition-all duration-500 shadow-2xl">
                   <img 
                     src={item.image_url || item.image || "/assets/vanguard-fallback.jpg"} 
@@ -118,10 +123,10 @@ export default function News() {
                   <div className="absolute bottom-6 left-6 right-6">
                     <h3 className="text-xl font-bold text-white group-hover:text-red-500 transition-colors leading-tight italic uppercase tracking-tighter line-clamp-2">
                        {item.title}
-                    </h3>
+                     </h3>
                   </div>
                 </div>
-              </Link>
+              </a>
               
               <div className="mt-6 px-4 flex items-center justify-between">
                 <div className="flex items-center gap-3">

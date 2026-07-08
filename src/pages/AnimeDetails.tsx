@@ -22,6 +22,7 @@ import {
 } from '../lib/watchlist';
 import { getFallbackDetail } from '../lib/jikanFallback';
 import RatingRelay from '../components/RatingRelay';
+import ShareModule from '../components/ShareModule';
 
 // Smart local high-fidelity mock character data generator based on titles
 const getMockCharacters = (title: string) => {
@@ -282,6 +283,7 @@ export default function AnimeDetails() {
   const [characters, setCharacters] = useState<any[]>([]);
   const [selectedChar, setSelectedChar] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isShareOpen, setIsShareOpen] = useState(false);
 
   // Watchlist tracker states
   const [inList, setInList] = useState(false);
@@ -551,7 +553,7 @@ export default function AnimeDetails() {
            </div>
 
            {/* Watchlist Quick Action Controller */}
-           <div className="z-30">
+           <div className="z-30 flex flex-wrap items-center gap-3 justify-center md:justify-start">
               <button 
                 onClick={handleWatchlistToggle}
                 className={`px-6 py-3 rounded-full font-black text-[9px] uppercase tracking-widest flex items-center gap-2.5 cursor-pointer transition-all ${
@@ -562,6 +564,16 @@ export default function AnimeDetails() {
               >
                 <Bookmark size={11} fill={inList ? "currentColor" : "none"} />
                 {inList ? "In My Watchlist [Tracked]" : "Add to My Watchlist"}
+              </button>
+
+              <button
+                onClick={() => setIsShareOpen(true)}
+                className="px-6 py-3 bg-[#00ffff]/10 hover:bg-[#00ffff]/20 border border-[#00ffff]/30 hover:border-[#00ffff] text-[#00ffff] hover:shadow-[0_0_20px_rgba(0,255,255,0.4)] rounded-full font-black text-[9px] uppercase tracking-widest flex items-center gap-2.5 cursor-pointer transition-all"
+                title="Open secure neural share uplink"
+                id="share-transmission-btn"
+              >
+                <Share2 size={11} className="animate-pulse" />
+                Share Transmission
               </button>
            </div>
         </div>
@@ -978,6 +990,11 @@ export default function AnimeDetails() {
         )}
       </AnimatePresence>
 
+      <ShareModule 
+        isOpen={isShareOpen} 
+        onClose={() => setIsShareOpen(false)} 
+        title={anime?.title || 'Anime Details Archive'} 
+      />
     </div>
   );
 }

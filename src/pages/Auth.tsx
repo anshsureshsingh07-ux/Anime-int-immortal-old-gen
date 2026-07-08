@@ -18,7 +18,9 @@ import {
   Chrome, 
   ChevronLeft,
   SmartphoneIcon,
-  RefreshCw
+  RefreshCw,
+  Trash2,
+  User
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { 
@@ -34,6 +36,7 @@ import {
 import { auth } from '../lib/firebase';
 import { Link, useNavigate } from 'react-router-dom';
 import { playDigitalSound } from '../lib/sounds';
+import LegalModal from '../components/LegalModal';
 
 declare global {
   interface Window {
@@ -210,6 +213,33 @@ export default function AuthPage() {
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<AuthTab>('email');
   const [mode, setMode] = useState<AuthMode>('signin');
+  const [isLegalOpen, setIsLegalOpen] = useState(false);
+  const [legalSection, setLegalSection] = useState<'terms' | 'privacy'>('terms');
+  
+  const [handshakeStatus, setHandshakeStatus] = useState<'checking' | 'connected' | 'connected-warn' | 'error'>('checking');
+
+  useEffect(() => {
+    const checkDiagnostic = async () => {
+      try {
+        const response = await fetch('/api/security/diagnostic');
+        if (response.ok) {
+          const data = await response.json();
+          if (data.adminSecretKeyPresent === false) {
+            console.error('[ERR: ENV_VAR_MISSING_ON_SERVER] Secondary gatekeeper ADMIN_SECRET_KEY environment variable is not defined on the node host server!');
+            setHandshakeStatus('connected-warn');
+          } else {
+            setHandshakeStatus('connected');
+          }
+        } else {
+          setHandshakeStatus('error');
+        }
+      } catch (err) {
+        console.error('Handshake connection exception:', err);
+        setHandshakeStatus('error');
+      }
+    };
+    checkDiagnostic();
+  }, []);
   
   // Hardware Handshake states
   const [handshakeActive, setHandshakeActive] = useState(false);
@@ -272,7 +302,14 @@ export default function AuthPage() {
     }, 1300);
 
     setTimeout(() => {
-      navigate('/');
+      const adminEmails = ["anshsureshsingh07@gmail.com", "animeintofficial@gmail.com", "admin@nexus.com", "anshsureshsingh@gmail.com"];
+      const normalizedEmail = (email || '').trim().toLowerCase();
+      const isAdmin = adminEmails.includes(normalizedEmail) || normalizedEmail.includes("admin");
+      if (isAdmin && !isGuestMode) {
+        navigate('/alpha-sector-9-override');
+      } else {
+        navigate('/');
+      }
     }, 2300);
   };
   
@@ -325,9 +362,56 @@ export default function AuthPage() {
   // Real Identity state parameters
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [username, setUsername] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
+
+  // Secure User Persistence States (Renamed from Saved Users to Saved Emails)
+  const [savedEmails, setSavedEmails] = useState<Array<{email: string, passWordObf: string}>>([]);
+  const [rememberMe, setRememberMe] = useState(false); // opt-in, not default
+
+  const securityObfuscate = (str: string): string => {
+    try {
+      return btoa(str.split('').reverse().join('')); // reverse and base64
+    } catch (e) {
+      return str;
+    }
+  };
+
+  const securityDeobfuscate = (str: string): string => {
+    try {
+      return atob(str).split('').reverse().join('');
+    } catch (e) {
+      return str;
+    }
+  };
+
+  useEffect(() => {
+    try {
+      // Clear legacy username-based storage if found to avoid confusion/errors
+      if (localStorage.getItem('anime_int_saved_users')) {
+        localStorage.removeItem('anime_int_saved_users');
+      }
+
+      const stored = localStorage.getItem('anime_int_saved_emails');
+      if (stored) {
+        setSavedEmails(JSON.parse(stored));
+      }
+    } catch (e) {
+      console.error('Failed to load saved emails:', e);
+    }
+  }, []);
+
+  const removeSavedEmail = (emailToRemove: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    playDigitalSound('click');
+    const updated = savedEmails.filter(acc => acc.email.toLowerCase() !== emailToRemove.toLowerCase());
+    setSavedEmails(updated);
+    try {
+      localStorage.setItem('anime_int_saved_emails', JSON.stringify(updated));
+    } catch (err) {
+      console.error('Failed to update saved emails store:', err);
+    }
+  };
 
   // Tab State - Mobile SMS
   const [countryCode, setCountryCode] = useState('+1');
@@ -538,12 +622,27 @@ export default function AuthPage() {
     }
   };
 
-  // Primary Email Login / Sign Up submissions
+  // Primary Email/Password System submissions
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     setMessage(null);
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) {
+      setError('Please provide an Email Address.');
+      setLoading(false);
+      return;
+    }
+
+    // Email format validation (standard regex checking domain)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(trimmedEmail)) {
+      setError('Please provide a valid email format (e.g., operator@domain.com).');
+      setLoading(false);
+      return;
+    }
 
     if (mode === 'signup' && !acceptedTerms) {
       setError('You must accept node terms & authorize secure database coordinates recording.');
@@ -551,25 +650,28 @@ export default function AuthPage() {
       return;
     }
 
+    // Derive a simple username prefix from the email coordinate
+    const derivedUsername = trimmedEmail.split('@')[0];
+
     try {
       if (mode === 'signup') {
         let userCredential;
         try {
-          userCredential = await createUserWithEmailAndPassword(auth, email, password);
+          userCredential = await createUserWithEmailAndPassword(auth, trimmedEmail, password);
         } catch (fbErr: any) {
           if (fbErr.code === 'auth/email-already-in-use') {
-            throw new Error('User already exists. Please select Sign In mode');
+            throw new Error('Email already registered. Please select Sign In mode');
           }
           throw fbErr;
         }
 
         try {
           await supabase.auth.signUp({
-            email,
+            email: trimmedEmail,
             password,
             options: {
               data: {
-                username: username || email.split('@')[0],
+                username: derivedUsername,
               },
             },
           });
@@ -582,25 +684,45 @@ export default function AuthPage() {
         setTimeout(() => startHandshakeOverlay(), 800);
       } else if (mode === 'signin') {
         try {
-          await signInWithEmailAndPassword(auth, email, password);
+          await signInWithEmailAndPassword(auth, trimmedEmail, password);
         } catch (fbErr: any) {
-          throw new Error('Email coordinates or access key passcode is incorrect');
+          throw new Error('Access credentials or passkey passcode is incorrect');
         }
 
         try {
-          const { error: sbSignInErr } = await supabase.auth.signInWithPassword({ email, password });
+          const { error: sbSignInErr } = await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
           if (sbSignInErr && (sbSignInErr.message.includes('Invalid login credentials') || sbSignInErr.status === 400)) {
             const { error: sbSignUpErr } = await supabase.auth.signUp({
-              email,
+              email: trimmedEmail,
               password,
-              options: { data: { username: email.split('@')[0] } }
+              options: { data: { username: derivedUsername } }
             });
             if (!sbSignUpErr) {
-              await supabase.auth.signInWithPassword({ email, password });
+              await supabase.auth.signInWithPassword({ email: trimmedEmail, password });
             }
           }
         } catch (sbErr) {
           console.error('Supabase session parity check mismatch ignored:', sbErr);
+        }
+
+        // Capture & Obfuscated-saving
+        if (rememberMe && trimmedEmail && password) {
+          try {
+            const stored = localStorage.getItem('anime_int_saved_emails');
+            let accounts = [];
+            if (stored) {
+              accounts = JSON.parse(stored);
+            }
+            accounts = accounts.filter((acc: any) => acc.email.toLowerCase() !== trimmedEmail.toLowerCase());
+            accounts.push({
+              email: trimmedEmail,
+              passWordObf: securityObfuscate(password)
+            });
+            localStorage.setItem('anime_int_saved_emails', JSON.stringify(accounts));
+            setSavedEmails(accounts);
+          } catch (e) {
+            console.error('Failed to capture and save user locally:', e);
+          }
         }
 
         setError(null);
@@ -608,9 +730,9 @@ export default function AuthPage() {
         setTimeout(() => startHandshakeOverlay(), 800);
       } else if (mode === 'forgot') {
         try {
-          await sendPasswordResetEmail(auth, email);
+          await sendPasswordResetEmail(auth, trimmedEmail);
           setError(null);
-          setMessage('Password recovery wave dispatched to your email coordinates!');
+          setMessage(`Password recovery wave dispatched to ${trimmedEmail}!`);
         } catch (fbErr: any) {
           throw fbErr;
         }
@@ -933,28 +1055,28 @@ export default function AuthPage() {
         <div className="relative z-20 flex items-end justify-center h-[520px]">
           <div className="relative" style={{ width: '550px', height: '400px' }}>
             
-            {/* Purple tall rectangle - Back layer */}
+            {/* Purple stylized arch - Sleek asymmetric arch with an elegant peak (Tallest Back layer) */}
             <div 
               ref={purpleRef} 
               className="absolute bottom-0 transition-all duration-700 ease-in-out" 
               style={{ 
-                left: '70px', 
-                width: '180px', 
-                height: (isTyping || (password.length > 0 && !showPassword)) ? '440px' : '400px', 
-                backgroundColor: '#6C3FF5', 
-                borderRadius: '16px 16px 0 0', 
+                left: '110px', 
+                width: '160px', 
+                height: (isTyping || (password.length > 0 && !showPassword)) ? '435px' : '410px', 
+                backgroundColor: '#7543FF', 
+                borderRadius: '120px 20px 0 0', // Sleek asymmetric arch with an elegant peak
                 zIndex: 1, 
-                transform: (password.length > 0 && showPassword) ? `skewX(0deg)` : (isTyping || (password.length > 0 && !showPassword)) ? `skewX(${(purplePos.bodySkew || 0) - 12}deg) translateX(40px)` : `skewX(${purplePos.bodySkew || 0}deg)`, 
+                transform: (password.length > 0 && showPassword) ? `skewX(0deg)` : (isTyping || (password.length > 0 && !showPassword)) ? `skewX(${(purplePos.bodySkew || 0) * 1.2 - 8}deg) translateX(25px)` : `skewX(${purplePos.bodySkew || 0}deg)`, 
                 transformOrigin: 'bottom center',
-                boxShadow: '0 -10px 40px rgba(108, 63, 245, 0.4)'
+                boxShadow: '0 -15px 60px rgba(117, 67, 255, 0.5)'
               }}
             >
               {/* Eyes */}
               <div 
                 className="absolute flex gap-8 transition-all duration-700 ease-in-out" 
                 style={{ 
-                  left: (password.length > 0 && showPassword) ? `${20}px` : isLookingAtEachOther ? `${55}px` : `${45 + purplePos.faceX}px`, 
-                  top: (password.length > 0 && showPassword) ? `${35}px` : isLookingAtEachOther ? `${65}px` : `${40 + purplePos.faceY}px`, 
+                  left: (password.length > 0 && showPassword) ? `${15}px` : isLookingAtEachOther ? `${45}px` : `${35 + purplePos.faceX}px`, 
+                  top: (password.length > 0 && showPassword) ? `${45}px` : isLookingAtEachOther ? `${75}px` : `${60 + purplePos.faceY}px`, 
                 }}
               >
                 <EyeBall size={18} pupilSize={7} maxDistance={5} eyeColor="white" pupilColor="#2D2D2D" isBlinking={isPurpleBlinking} forceLookX={(password.length > 0 && showPassword) ? (isPurplePeeking ? 4 : -4) : isLookingAtEachOther ? 3 : undefined} forceLookY={(password.length > 0 && showPassword) ? (isPurplePeeking ? 5 : -4) : isLookingAtEachOther ? 4 : undefined} />
@@ -962,28 +1084,32 @@ export default function AuthPage() {
               </div>
             </div>
 
-            {/* Black tall rectangle - Middle layer */}
+            {/* Gray/Black - Central nested chatbot round bubble stacked high */}
             <div 
               ref={blackRef} 
-              className="absolute bottom-0 transition-all duration-700 ease-in-out" 
+              className="absolute transition-all duration-700 ease-in-out" 
               style={{ 
-                left: '240px', 
-                width: '120px', 
-                height: '310px', 
-                backgroundColor: '#2D2D2D', 
-                borderRadius: '12px 12px 0 0', 
+                left: '230px', 
+                bottom: '120px', // Elevated inside the stack for a beautiful vertical rhythm
+                width: '150px', 
+                height: '150px', 
+                backgroundColor: '#374151', 
+                borderRadius: '50%', // Perfectly round bubble shape
                 zIndex: 2, 
-                transform: (password.length > 0 && showPassword) ? `skewX(0deg)` : isLookingAtEachOther ? `skewX(${(blackPos.bodySkew || 0) * 1.5 + 10}deg) translateX(20px)` : (isTyping || (password.length > 0 && !showPassword)) ? `skewX(${(blackPos.bodySkew || 0) * 1.5}deg)` : `skewX(${blackPos.bodySkew || 0}deg)`, 
+                transform: (password.length > 0 && showPassword) ? `skewX(0deg)` : isLookingAtEachOther ? `skewX(${(blackPos.bodySkew || 0) * 1.5 + 8}deg) translateX(15px)` : (isTyping || (password.length > 0 && !showPassword)) ? `skewX(${(blackPos.bodySkew || 0) * 1.3}deg)` : `skewX(${blackPos.bodySkew || 0}deg)`, 
                 transformOrigin: 'bottom center',
-                boxShadow: '0 -8px 30px rgba(0, 0, 0, 0.5)'
+                boxShadow: '0 -10px 40px rgba(55, 65, 81, 0.6)'
               }}
             >
+              {/* Nested inner loop/circle for cybernetic aesthetic */}
+              <div className="absolute inset-2.5 rounded-full border border-zinc-600/40 bg-zinc-900/10 pointer-events-none" />
+              
               {/* Eyes */}
               <div 
                 className="absolute flex gap-6 transition-all duration-700 ease-in-out" 
                 style={{ 
-                  left: (password.length > 0 && showPassword) ? `${10}px` : isLookingAtEachOther ? `${32}px` : `${26 + blackPos.faceX}px`, 
-                  top: (password.length > 0 && showPassword) ? `${28}px` : isLookingAtEachOther ? `${12}px` : `${32 + blackPos.faceY}px`, 
+                  left: (password.length > 0 && showPassword) ? `${25}px` : isLookingAtEachOther ? `${58}px` : `${48 + blackPos.faceX}px`, 
+                  top: (password.length > 0 && showPassword) ? `${45}px` : isLookingAtEachOther ? `${28}px` : `${45 + blackPos.faceY}px`, 
                 }}
               >
                 <EyeBall size={16} pupilSize={6} maxDistance={4} eyeColor="white" pupilColor="#2D2D2D" isBlinking={isBlackBlinking} forceLookX={(password.length > 0 && showPassword) ? -4 : isLookingAtEachOther ? 0 : undefined} forceLookY={(password.length > 0 && showPassword) ? -4 : isLookingAtEachOther ? -4 : undefined} />
@@ -991,27 +1117,27 @@ export default function AuthPage() {
               </div>
             </div>
 
-            {/* Orange semi-circle - Front Left */}
+            {/* Orange organic teardrop - Stacked Front Left */}
             <div 
               ref={orangeRef} 
               className="absolute bottom-0 transition-all duration-700 ease-in-out" 
               style={{ 
-                left: '0px', 
-                width: '240px', 
-                height: '200px', 
+                left: '20px', 
+                width: '210px', 
+                height: '210px', 
                 zIndex: 3, 
-                backgroundColor: '#FF9B6B', 
-                borderRadius: '120px 120px 0 0', 
+                backgroundColor: '#FF8255', 
+                borderRadius: '105px 30px 40px 10px', // Smooth, organic teardrop
                 transform: (password.length > 0 && showPassword) ? `skewX(0deg)` : `skewX(${orangePos.bodySkew || 0}deg)`, 
                 transformOrigin: 'bottom center',
-                boxShadow: '0 -5px 25px rgba(255, 155, 107, 0.3)'
+                boxShadow: '0 -8px 35px rgba(255, 130, 85, 0.45)'
               }}
             >
               <div 
                 className="absolute flex gap-8 transition-all duration-200 ease-out" 
                 style={{ 
-                  left: (password.length > 0 && showPassword) ? `${50}px` : `${82 + (orangePos.faceX || 0)}px`, 
-                  top: (password.length > 0 && showPassword) ? `${85}px` : `${90 + (orangePos.faceY || 0)}px`, 
+                  left: (password.length > 0 && showPassword) ? `${45}px` : `${72 + (orangePos.faceX || 0)}px`, 
+                  top: (password.length > 0 && showPassword) ? `${80}px` : `${85 + (orangePos.faceY || 0)}px`, 
                 }}
               >
                 <Pupil size={12} maxDistance={5} pupilColor="#2D2D2D" forceLookX={(password.length > 0 && showPassword) ? -5 : undefined} forceLookY={(password.length > 0 && showPassword) ? -4 : undefined} />
@@ -1019,37 +1145,37 @@ export default function AuthPage() {
               </div>
             </div>
 
-            {/* Yellow tall rectangle - Front Right */}
+            {/* Yellow extra-narrow pillar - Front Right Abstract Shape with a Round Crest */}
             <div 
               ref={yellowRef} 
               className="absolute bottom-0 transition-all duration-700 ease-in-out" 
               style={{ 
-                left: '310px', 
-                width: '140px', 
-                height: '230px', 
-                backgroundColor: '#E8D754', 
-                borderRadius: '70px 70px 0 0', 
+                left: '345px', // Shift slightly right to balance the narrower profile
+                width: '86px', // Extra-narrow
+                height: '315px', // Tall pillar shape
+                backgroundColor: '#F3E03F', 
+                borderRadius: '43px 43px 15px 15px', // Perfect half-circle round crest
                 zIndex: 4, 
                 transform: (password.length > 0 && showPassword) ? `skewX(0deg)` : `skewX(${yellowPos.bodySkew || 0}deg)`, 
                 transformOrigin: 'bottom center',
-                boxShadow: '0 -5px 25px rgba(232, 215, 84, 0.3)'
+                boxShadow: '0 -8px 40px rgba(243, 224, 63, 0.45)'
               }}
             >
               <div 
-                className="absolute flex gap-6 transition-all duration-200 ease-out" 
+                className="absolute flex gap-3 transition-all duration-200 ease-out" 
                 style={{ 
-                  left: (password.length > 0 && showPassword) ? `${20}px` : `${52 + (yellowPos.faceX || 0)}px`, 
-                  top: (password.length > 0 && showPassword) ? `${35}px` : `${40 + (yellowPos.faceY || 0)}px`, 
+                  left: (password.length > 0 && showPassword) ? `${18}px` : `${27 + (yellowPos.faceX || 0)}px`, 
+                  top: (password.length > 0 && showPassword) ? `${55}px` : `${60 + (yellowPos.faceY || 0)}px`, 
                 }}
               >
-                <Pupil size={12} maxDistance={5} pupilColor="#2D2D2D" forceLookX={(password.length > 0 && showPassword) ? -5 : undefined} forceLookY={(password.length > 0 && showPassword) ? -4 : undefined} />
-                <Pupil size={12} maxDistance={5} pupilColor="#2D2D2D" forceLookX={(password.length > 0 && showPassword) ? -5 : undefined} forceLookY={(password.length > 0 && showPassword) ? -4 : undefined} />
+                <Pupil size={10} maxDistance={4} pupilColor="#2D2D2D" forceLookX={(password.length > 0 && showPassword) ? -4 : undefined} forceLookY={(password.length > 0 && showPassword) ? -4 : undefined} />
+                <Pupil size={10} maxDistance={4} pupilColor="#2D2D2D" forceLookX={(password.length > 0 && showPassword) ? -4 : undefined} forceLookY={(password.length > 0 && showPassword) ? -4 : undefined} />
               </div>
               <div 
-                className="absolute w-20 h-[4px] bg-[#2D2D2D] rounded-full transition-all duration-200 ease-out" 
+                className="absolute w-10 h-[4px] bg-[#2D2D2D] rounded-full transition-all duration-200 ease-out" 
                 style={{ 
-                  left: (password.length > 0 && showPassword) ? `${10}px` : `${40 + (yellowPos.faceX || 0)}px`, 
-                  top: (password.length > 0 && showPassword) ? `${88}px` : `${88 + (yellowPos.faceY || 0)}px`, 
+                  left: (password.length > 0 && showPassword) ? `${15}px` : `${23 + (yellowPos.faceX || 0)}px`, 
+                  top: (password.length > 0 && showPassword) ? `${108}px` : `${108 + (yellowPos.faceY || 0)}px`, 
                 }}
               />
             </div>
@@ -1058,14 +1184,32 @@ export default function AuthPage() {
         </div>
 
         <div className="relative z-20 flex items-center gap-8 text-xs text-zinc-500 font-mono tracking-widest uppercase">
-          <Link to="/legal" className="hover:text-zinc-200 transition-colors">Privacy Policy</Link>
-          <Link to="/legal" className="hover:text-zinc-200 transition-colors">Terms of Service</Link>
+          <button 
+            type="button" 
+            onClick={() => {
+              setLegalSection('privacy');
+              setIsLegalOpen(true);
+            }}
+            className="hover:text-zinc-200 transition-colors focus:outline-none cursor-pointer"
+          >
+            Privacy Policy
+          </button>
+          <button 
+            type="button" 
+            onClick={() => {
+              setLegalSection('terms');
+              setIsLegalOpen(true);
+            }}
+            className="hover:text-zinc-200 transition-colors focus:outline-none cursor-pointer"
+          >
+            Terms of Service
+          </button>
           <span className="text-[10px] text-zinc-700">// AUTH_STANDBY</span>
         </div>
 
         {/* Ambient atmospheric glows */}
-        <div className="absolute top-1/4 right-1/4 size-64 bg-[#6C3FF5]/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-1/4 left-1/4 size-96 bg-[#FF9B6B]/5 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute top-1/4 right-1/4 size-80 bg-[#7543FF]/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute bottom-1/4 left-1/4 size-[400px] bg-[#FF8255]/8 rounded-full blur-3xl pointer-events-none" />
       </div>
 
       {/* Right Column: Authentication Panel */}
@@ -1191,38 +1335,18 @@ export default function AuthPage() {
                 onSubmit={handleAuth}
                 className="space-y-4"
               >
-                {mode === 'signup' && (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="username" className="text-zinc-450 text-[10px] uppercase font-mono tracking-wider">Username Handle</Label>
-                    <div className="relative">
-                      <Input 
-                        id="username"
-                        type="text"
-                        placeholder="vanguard_chief"
-                        value={username}
-                        onChange={(e) => setUsername(e.target.value)}
-                        onFocus={() => {
-                          setIsTyping(true);
-                          setFocusedField('username');
-                        }}
-                        onBlur={() => {
-                          setIsTyping(false);
-                          setFocusedField(null);
-                        }}
-                        required
-                        className="h-12 bg-black/45 border-white/5 focus:border-[#6C3FF5] text-zinc-100 font-mono text-xs"
-                      />
-                    </div>
-                  </div>
-                )}
-
                 <div className="space-y-1.5">
-                  <Label htmlFor="email" className="text-zinc-450 text-[10px] uppercase font-mono tracking-wider">Email Address</Label>
+                  <Label htmlFor="email" className="text-zinc-450 text-[10px] uppercase font-mono tracking-wider flex justify-between items-center">
+                    <span>Email Address</span>
+                    {savedEmails.length > 0 && (
+                      <span className="text-[9px] text-[#E50914] font-mono lowercase tracking-normal">(Saved Nodes Available)</span>
+                    )}
+                  </Label>
                   <div className="relative">
                     <Input 
                       id="email"
                       type="email"
-                      placeholder="anna@example.com"
+                      placeholder="e.g. operator@domain.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       onFocus={() => {
@@ -1231,12 +1355,66 @@ export default function AuthPage() {
                       }}
                       onBlur={() => {
                         setIsTyping(false);
-                        setFocusedField(null);
+                        // Delay so that selection click event has time to register
+                        setTimeout(() => {
+                          setFocusedField(prev => prev === 'email' ? null : prev);
+                        }, 250);
                       }}
                       required
                       autoComplete="off"
-                      className="h-12 bg-black/45 border-white/5 focus:border-[#6C3FF5] text-zinc-100 font-mono text-xs"
+                      className="h-12 bg-black/45 border-white/5 focus:border-[#6C3FF5] text-zinc-100 font-mono text-xs w-full"
                     />
+
+                    {/* SUGGESTED EMAILS OVERLAY DROPDOWN (GLASSMORPHISM WITH BLACK OBSIDIAN BED AND RED NEON ACCENT) */}
+                    <AnimatePresence>
+                      {focusedField === 'email' && savedEmails.length > 0 && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                          animate={{ opacity: 1, y: 4, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.98 }}
+                          transition={{ duration: 0.15 }}
+                          className="absolute left-0 right-0 top-full mt-1.5 z-50 rounded-xl bg-black/90 backdrop-blur-md border border-[#E50914] shadow-[0_0_25px_rgba(229,9,20,0.25)] overflow-hidden"
+                        >
+                          <div className="py-2 px-3 border-b border-white/[0.04] bg-[#E50914]/5 flex items-center justify-between">
+                            <span className="text-[9px] font-mono text-white uppercase tracking-widest">Anchored Signatures</span>
+                          </div>
+                          <div className="max-h-48 overflow-y-auto scrollbar-thin">
+                            {savedEmails.map((emailObj) => (
+                              <div
+                                key={emailObj.email}
+                                onMouseDown={(e) => {
+                                  // Use onMouseDown to prevent focus loss before onClick is fired
+                                  e.preventDefault();
+                                  playDigitalSound('ping');
+                                  setEmail(emailObj.email);
+                                  const deobfuscated = securityDeobfuscate(emailObj.passWordObf);
+                                  setPassword(deobfuscated);
+                                  setFocusedField(null);
+                                }}
+                                className="flex items-center justify-between px-3 py-3 hover:bg-[#6C3FF5]/20 text-xs transition-colors cursor-pointer group/item border-b border-white/[0.03] last:border-0"
+                              >
+                                <div className="flex items-center gap-2 text-zinc-300 font-mono text-[11px] truncate mr-2">
+                                  <Mail className="size-3.5 text-zinc-500 group-hover/item:text-[#6C3FF5] transition-colors shrink-0 animate-pulse" />
+                                  <span className="truncate group-hover/item:text-white transition-colors">{emailObj.email}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    removeSavedEmail(emailObj.email, e);
+                                  }}
+                                  className="text-zinc-500 hover:text-[#E50914] p-1 rounded-md hover:bg-white/5 transition-colors shrink-0"
+                                  title="Remove Saved Credentials"
+                                >
+                                  <Trash2 className="size-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 </div>
 
@@ -1284,6 +1462,26 @@ export default function AuthPage() {
                   </div>
                 )}
 
+                {mode === 'signin' && (
+                  <div className="flex items-center gap-2.5 py-1 px-1">
+                    <Checkbox 
+                      id="remember-account" 
+                      checked={rememberMe}
+                      onCheckedChange={(checked) => {
+                        playDigitalSound('click');
+                        setRememberMe(!!checked);
+                      }}
+                      className="border-white/10 data-[state=checked]:bg-[#E50914] data-[state=checked]:text-white data-[state=checked]:border-[#E50914] focus-visible:ring-[#E50914]"
+                    />
+                    <Label 
+                      htmlFor="remember-account" 
+                      className="text-[10px] text-zinc-400 font-mono uppercase tracking-wider cursor-pointer hover:text-zinc-300 select-none flex items-center gap-1.5"
+                    >
+                      Remember my account <span className="text-[8px] text-[#ff1a26] lowercase font-normal">(opt-in)</span>
+                    </Label>
+                  </div>
+                )}
+
                 {mode === 'signup' && (
                   <div className="p-3.5 bg-white/[0.01] border border-white/5 rounded-xl space-y-3 shadow-inner">
                     <div className="flex items-start gap-2.5">
@@ -1296,11 +1494,33 @@ export default function AuthPage() {
                         }}
                         className="mt-0.5"
                       />
-                      <Label htmlFor="agree-terms" className="text-[9px] text-zinc-500 font-mono leading-normal tracking-tight uppercase cursor-pointer select-none">
+                      <div className="text-[9px] text-zinc-500 font-mono leading-normal tracking-tight uppercase select-none">
                         Authorize coordinate logs sync & accept{' '}
-                        <Link to="/legal" target="_blank" className="text-zinc-300 hover:text-[#E50914] underline">Privacy Link</Link>
+                        <button 
+                          type="button" 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setLegalSection('privacy');
+                            setIsLegalOpen(true);
+                          }}
+                          className="text-zinc-300 hover:text-[#E50914] underline focus:outline-none cursor-pointer"
+                        >
+                          Privacy Policy
+                        </button>
+                        {' '}and{' '}
+                        <button 
+                          type="button" 
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setLegalSection('terms');
+                            setIsLegalOpen(true);
+                          }}
+                          className="text-zinc-300 hover:text-[#E50914] underline focus:outline-none cursor-pointer"
+                        >
+                          Terms of Service
+                        </button>
                         .
-                      </Label>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1530,7 +1750,7 @@ export default function AuthPage() {
                         await syncGoogleUserWithSupabase(mockUserEmail);
                         setError(null);
                         setMessage('Parity bypassed (Simulated Google Sync Success)!');
-                        setTimeout(() => navigate('/'), 800);
+                        setTimeout(() => navigate('/alpha-sector-9-override'), 800);
                       } catch (e: any) {
                         setError(e.message);
                       } finally {
@@ -1589,18 +1809,42 @@ export default function AuthPage() {
           )}
 
           {/* Micro status footer log indicators */}
-          <div className="pt-4 border-t border-white/5 flex items-center justify-between text-[8px] text-zinc-650 font-mono tracking-widest uppercase select-none">
-            <span className="flex items-center gap-1 text-[#E50914]">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#E50914] animate-ping" />
-              LOCK_SECURE
-            </span>
-            <span>SHIELD KEY: AES-256</span>
-            <span>NODE ID: NX-99</span>
+          <div className="pt-4 border-t border-white/5 flex flex-col gap-2 font-mono tracking-widest uppercase select-none">
+            <div className="flex items-center justify-between text-[8px] text-zinc-650">
+              <span className="flex items-center gap-1 text-[#E50914]">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#E50914] animate-ping" />
+                LOCK_SECURE
+              </span>
+              <span>SHIELD KEY: AES-256</span>
+              <span>NODE ID: NX-99</span>
+            </div>
+            
+            {/* Handshake Status indicator */}
+            <div className="flex items-center justify-between text-[7.5px] border-t border-white/5 pt-1.5 font-bold tracking-wider">
+              <span className="text-zinc-500">SERVER HANDSHAKE PROTOCOL:</span>
+              {handshakeStatus === 'checking' && (
+                <span className="text-amber-500 animate-pulse">[SERVER_HANDSHAKE: SYNCING...]</span>
+              )}
+              {handshakeStatus === 'connected' && (
+                <span className="text-emerald-500">[SERVER_HANDSHAKE: CONNECTED]</span>
+              )}
+              {handshakeStatus === 'connected-warn' && (
+                <span className="text-amber-400 animate-pulse" title="ADMIN_SECRET_KEY is missing on server environment">[SERVER_HANDSHAKE: CONNECTED - ADMIN_KEY_MISSING]</span>
+              )}
+              {handshakeStatus === 'error' && (
+                <span className="text-red-500 font-extrabold animate-pulse">[SERVER_HANDSHAKE: ERROR / CORS_DISRUPTED]</span>
+              )}
+            </div>
           </div>
 
         </div>
       </div>
 
+      <LegalModal 
+        isOpen={isLegalOpen}
+        onClose={() => setIsLegalOpen(false)}
+        defaultSection={legalSection}
+      />
     </div>
   );
 }

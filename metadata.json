@@ -1,6 +1,6 @@
 {
   "name": "Anime Int",
   "description": "The ultimate anime community nexus. Features a real-time release tracker, community voting, and the Vanguard Admin System for full archive management.",
-  "requestFramePermissions": [],
+  "requestFramePermissions": ["camera"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

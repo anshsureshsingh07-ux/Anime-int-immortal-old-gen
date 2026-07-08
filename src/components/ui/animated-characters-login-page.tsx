@@ -171,6 +171,15 @@ const EyeBall = ({
 export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [email, setEmail] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
+
+  useEffect(() => {
+    const savedEmail = localStorage.getItem("remembered_email");
+    if (savedEmail) {
+      setEmail(savedEmail);
+      setRememberMe(true);
+    }
+  }, []);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -288,6 +297,14 @@ export default function LoginPage() {
     e.preventDefault();
     setError("");
     setIsLoading(true);
+
+    // Save or clear email in localStorage based on Remember Me checkbox choice
+    if (rememberMe) {
+      localStorage.setItem("remembered_email", email);
+    } else {
+      localStorage.removeItem("remembered_email");
+    }
+
     // Simulate API delay (quick)
     await new Promise((resolve) => setTimeout(resolve, 300));
     // Mock authentication - validate against dummy credentials
@@ -710,7 +727,11 @@ export default function LoginPage() {
             </div>
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <Checkbox id="remember" />
+                <Checkbox 
+                  id="remember" 
+                  checked={rememberMe} 
+                  onCheckedChange={(checked) => setRememberMe(!!checked)} 
+                />
                 <Label htmlFor="remember" className="text-sm font-normal cursor-pointer">
                   Remember for 30 days
                 </Label>

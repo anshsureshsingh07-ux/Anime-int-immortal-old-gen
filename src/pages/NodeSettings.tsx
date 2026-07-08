@@ -10,7 +10,8 @@ const THEME_PRESETS = [
   { id: 'akatsuki', name: 'Akatsuki Crimson', primary: '#E50914', glow: 'rgba(229,9,20,0.4)', description: 'Dark canvas with high-contrast emissive red accents.' },
   { id: 'stark', name: 'Stark Polar', primary: '#00BFFF', glow: 'rgba(0,191,255,0.4)', description: 'Freezing tundra theme with cool deep cyan aesthetics.' },
   { id: 'britannian', name: 'Britannia Royal', primary: '#A855F7', glow: 'rgba(168,85,247,0.4)', description: 'Purple imperial layouts mapping majestic power coordinates.' },
-  { id: 'lannister', name: 'Lannister Gold', primary: '#FF9900', glow: 'rgba(255,153,0,0.4)', description: 'Gold treasury theme outlining rich bedrock of wealth.' }
+  { id: 'lannister', name: 'Lannister Gold', primary: '#FF9900', glow: 'rgba(255,153,0,0.4)', description: 'Gold treasury theme outlining rich bedrock of wealth.' },
+  { id: 'emerald', name: 'Emerald Matrix', primary: '#10B981', glow: 'rgba(16,185,129,0.4)', description: 'Matrix look cyber green terminal nodes.' }
 ];
 
 export default function NodeSettings() {
@@ -44,6 +45,16 @@ export default function NodeSettings() {
     const savedTactile = localStorage.getItem('vanguard_tactile_alerts') !== 'false';
     setEcoMode(savedEco);
     setTactileAlerts(savedTactile);
+
+    const handleQuickThemeUpdate = (e: any) => {
+      if (e?.detail?.preset) {
+        setActivePreset(e.detail.preset);
+      }
+    };
+    window.addEventListener('vanguard-settings-update' as any, handleQuickThemeUpdate);
+    return () => {
+      window.removeEventListener('vanguard-settings-update' as any, handleQuickThemeUpdate);
+    };
   }, []);
 
   const handleApplySettings = () => {

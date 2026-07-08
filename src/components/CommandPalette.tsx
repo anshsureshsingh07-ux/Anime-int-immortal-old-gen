@@ -540,7 +540,7 @@ export function CommandPalette() {
                             <div
                               key={cmd.id}
                               onClick={() => executeCommand(cmd)}
-                              onMouseEnter={() => setSelectedIndex(overallIndex)}
+                              onPointerDown={() => setSelectedIndex(overallIndex)}
                               data-selected={isSelected}
                               className={`flex items-center justify-between gap-4 p-3 rounded-xl border transition-all cursor-pointer select-none ${
                                 isSelected

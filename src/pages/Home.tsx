@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { Flame, TrendingUp, Calendar, Play, ChevronRight, MessageSquare, Heart, ShieldAlert, Sparkles, Network } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
@@ -7,12 +7,14 @@ import { auth } from '../lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { FALLBACK_AIRING } from '../lib/jikanFallback';
 import { useNews } from '../App';
+import { generateInternalLink } from '../utils/urlFormatter';
 import AnnouncementsBanner from '../components/AnnouncementsBanner';
 import LikeButton from '../components/LikeButton';
 import CommentSection from '../components/CommentSection';
 import Sparkline from '../components/Sparkline';
 import { useThemeEngine } from '../context/ThemeEngineContext';
 import { playDigitalSound } from '../lib/sounds';
+import { verifySignature } from '../lib/signature';
 
 // Text scrambling algorithm for local cyber intrusion visual effects
 function scrambleText(text: string): string {
@@ -81,8 +83,36 @@ function enrichNewsArticles(rawArticles: any[]) {
   }).sort((a, b) => b.relevanceMatch - a.relevanceMatch);
 }
 
+function getRelativeTime(pubDateStr: string) {
+  try {
+    const pubDate = new Date(pubDateStr);
+    if (isNaN(pubDate.getTime())) return pubDateStr;
+    const now = new Date();
+    const diffMs = now.getTime() - pubDate.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return "just now";
+    if (diffMins < 60) return `${diffMins}m -> CURRENT`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    return `${diffDays}d ago`;
+  } catch {
+    return pubDateStr;
+  }
+}
+
+const breakingIntel = [
+  { id: 1, text: '[BREAKING]: Faction War 7 now live in Sector 9' },
+  { id: 2, text: '[UPDATE]: New Neural Maps added to Archives' },
+  { id: 3, text: '[ALERT]: System Sync complete' }
+];
+
 export default function Home() {
   const [news, setNews] = useState<any[]>([]);
+  const [intelStream, setIntelStream] = useState<any[]>([]);
+  const [intelStatus, setIntelStatus] = useState<string>("online");
+  const [intelLoading, setIntelLoading] = useState<boolean>(true);
   const [featuredAnime, setFeaturedAnime] = useState<any[]>([]);
   const { incrementEngagement } = useThemeEngine();
 
@@ -145,6 +175,32 @@ export default function Home() {
   const [votedOption, setVotedOption] = useState<string | null>(null);
   const [showPollEdit, setShowPollEdit] = useState(false);
   const [pollEditForm, setPollEditForm] = useState({ question: '', option_a: '', option_b: '' });
+  
+  const [cachedRecommendations, setCachedRecommendations] = useState<any[]>([]);
+
+  useEffect(() => {
+    const cached = localStorage.getItem('nexus_ai_recommendations_v1');
+    if (cached) {
+      try {
+        setCachedRecommendations(JSON.parse(cached));
+      } catch (e) {
+        console.error("Failed to parse cached recommendations in Home Feed", e);
+      }
+    }
+  }, []);
+
+  const [intelIndex, setIntelIndex] = useState(0);
+  const [intelHovered, setIntelHovered] = useState(false);
+
+  useEffect(() => {
+    if (intelHovered) return;
+
+    const interval = setInterval(() => {
+      setIntelIndex((prev) => (prev + 1) % breakingIntel.length);
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [intelHovered]);
 
   // Neural Feed log ticker state & automated generation hook
   const [systemLogs, setSystemLogs] = useState<any[]>([
@@ -193,6 +249,73 @@ export default function Home() {
     }, 4500);
 
     return () => clearInterval(logGeneratorInterval);
+  }, []);
+
+  useEffect(() => {
+    const handleNeuralLogEvent = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (!customEvent.detail) return;
+      const { text, source, timestamp } = customEvent.detail;
+      
+      const newLog = {
+        id: Date.now() + Math.random(),
+        text,
+        source: source || 'RECON-SYSTEM',
+        timestamp: timestamp || new Date().toLocaleTimeString([], { hour12: false })
+      };
+
+      setSystemLogs(prev => {
+        const updated = [...prev, newLog];
+        if (updated.length > 15) {
+          updated.shift();
+        }
+        return updated;
+      });
+    };
+
+    window.addEventListener('neural-log', handleNeuralLogEvent);
+    return () => {
+      window.removeEventListener('neural-log', handleNeuralLogEvent);
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    const fetchIntel = async () => {
+      try {
+        const res = await fetch("/api/news/intelligence");
+        if (res.ok) {
+          const json = await res.json();
+          if (isMounted) {
+            setIntelStream(json.latest || []);
+            setIntelStatus(json.status || "online");
+            if (json.status === "offline" && typeof window !== 'undefined') {
+              (window as any).logMobileError?.('DATA_STREAM_OFFLINE');
+            }
+          }
+        } else {
+          if (isMounted) setIntelStatus("offline");
+          if (typeof window !== 'undefined') {
+            (window as any).logMobileError?.('ERR_FEED_HTTP_FAIL');
+          }
+        }
+      } catch (err) {
+        console.error("Failed to query automated intel feed:", err);
+        if (isMounted) setIntelStatus("offline");
+        if (typeof window !== 'undefined') {
+          (window as any).logMobileError?.('ERR_FEED_CORS_FAIL');
+        }
+      } finally {
+        if (isMounted) setIntelLoading(false);
+      }
+    };
+
+    fetchIntel();
+    const interval = setInterval(fetchIntel, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
@@ -309,7 +432,10 @@ export default function Home() {
       }
       
       if (isMounted) {
-        if (newsData) setNews(enrichNewsArticles(newsData));
+        if (newsData) {
+          const liveNews = newsData.filter((item: any) => new Date(item.created_at) <= new Date());
+          setNews(enrichNewsArticles(liveNews));
+        }
         if (pollData) {
           setActivePoll(pollData);
           fetchPollVotes(pollData.id);
@@ -482,6 +608,42 @@ export default function Home() {
       <AnnouncementsBanner />
 
       <div className="p-8 grid grid-cols-12 gap-8">
+        {/* Auto-Rotating Intel Feed Header */}
+        <div 
+          id="rotating-intel-feed-header"
+          className="col-span-12 bg-black/40 border border-white/5 rounded-xl p-3.5 sm:p-4 flex items-center justify-between cursor-pointer group hover:border-crimson/25 transition-all duration-300 shadow-[0_4px_16px_rgba(0,0,0,0.6)]"
+          onMouseEnter={() => setIntelHovered(true)}
+          onMouseLeave={() => setIntelHovered(false)}
+        >
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${intelHovered ? "bg-amber-500" : "bg-crimson"}`}></span>
+              <span className={`relative inline-flex rounded-full h-2 w-2 ${intelHovered ? "bg-amber-500" : "bg-crimson"}`}></span>
+            </span>
+            <span className="text-[10px] sm:text-xs font-mono uppercase text-zinc-500 font-extrabold tracking-widest shrink-0 flex items-center gap-1.5 selection:bg-crimson">
+              INTEL_FEED_STREAM <span className="text-crimson/60 animate-pulse">&raquo;</span>
+            </span>
+            <div className="min-w-0 flex-1 overflow-hidden h-6 flex items-center">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={intelIndex}
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: -20, opacity: 0 }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                  className="font-mono font-bold text-xs sm:text-xs text-crimson drop-shadow-[0_0_4px_rgba(229,9,20,0.85)] tracking-wider truncate uppercase"
+                >
+                  {breakingIntel[intelIndex].text}
+                </motion.div>
+              </AnimatePresence>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 font-mono text-[8px] sm:text-[9px] text-zinc-500 shrink-0 uppercase tracking-widest bg-black/50 px-2 py-0.5 rounded border border-white/5 ml-3 selection:bg-crimson">
+            <span className={intelHovered ? "text-amber-500 font-bold" : "text-green-500"}>{intelHovered ? "[PAUSED]" : "[ROTATING]"}</span>
+            <span className="hidden sm:inline text-zinc-600">• POLLING: 10S</span>
+          </div>
+        </div>
+
         {/* Left Column: News & Feed */}
         <div className="col-span-12 lg:col-span-8 flex flex-col gap-6">
           <div className="relative h-80 w-full rounded-xl overflow-hidden group aluminum-frame emissive-crimson border border-crimson/35 shadow-2xl">
@@ -567,6 +729,108 @@ export default function Home() {
             </div>
           </div>
 
+          {/* Automated Intelligence Feed (Live RSS Channels) */}
+          <div className="bg-[#0b0b0d] border border-white/5 rounded-xl p-5 font-mono shadow-[0_0_20px_rgba(0,0,0,0.8)] relative overflow-hidden group/intel">
+            {/* Ambient visual background glow details */}
+            <div className="absolute top-0 right-0 w-24 h-24 bg-crimson/5 rounded-full blur-2xl pointer-events-none" />
+            <div className="absolute bottom-0 left-0 w-24 h-24 bg-zinc-800/20 rounded-full blur-2xl pointer-events-none" />
+
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-white/5 pb-3 mb-4 gap-2 relative z-10">
+              <div className="flex items-center gap-2">
+                <Network size={14} className="text-crimson animate-pulse" />
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-200">
+                  AUTOMATED_INTELLIGENCE_RELAY // RSS_LIVE_FEED
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`w-1.5 h-1.5 rounded-full ${intelStatus === "offline" ? "bg-red-500 animate-bounce" : "bg-emerald-500 animate-ping"}`} />
+                <span className={`text-[8px] font-black uppercase tracking-wider ${intelStatus === "offline" ? "text-red-500" : "text-emerald-500"}`}>
+                  {intelStatus === "offline" ? "[DATA_STREAM: OFFLINE]" : "LIVE_STREAM"}
+                </span>
+              </div>
+            </div>
+
+            {intelLoading ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-2.5 relative z-10">
+                <div className="w-5 h-5 border-2 border-crimson border-t-transparent rounded-full animate-spin" />
+                <span className="text-[8px] uppercase tracking-[0.2em] text-zinc-500">
+                  BUFFERING_NEURAL_STREAMS...
+                </span>
+              </div>
+            ) : (intelStatus === "offline" && intelStream.length === 0) ? (
+              <div className="py-10 flex flex-col items-center justify-center gap-2 text-center select-none relative z-10">
+                <ShieldAlert size={24} className="text-[#FF0000] animate-bounce mb-1" />
+                <span className="text-xs font-black text-[#FF0000] tracking-widest uppercase">
+                  [DATA_STREAM: OFFLINE]
+                </span>
+                <span className="text-[8.5px] text-zinc-500 uppercase max-w-[340px] leading-relaxed">
+                  CRITICAL_CONNECTION_DOWN // Upstream news streams unresponsive or unavailable.
+                </span>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 relative z-10">
+                {intelStream.map((item, index) => (
+                  <motion.div
+                    key={item.id}
+                    initial={{ x: -100, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{
+                      type: "spring",
+                      stiffness: 90,
+                      damping: 12,
+                      delay: index * 0.08
+                    }}
+                    className="border border-white/5 bg-black/40 rounded-lg overflow-hidden flex flex-col group hover:border-crimson/40 hover:bg-black/60 transition-all duration-300 cursor-pointer relative"
+                    onClick={() => {
+                      playDigitalSound('click');
+                      window.open(item.link, '_blank', 'noopener,noreferrer');
+                    }}
+                  >
+                    {/* Aspects 16:9 (aspect-video) Thumbnail container */}
+                    <div className="relative aspect-video w-full overflow-hidden bg-black/45 border-b border-white/5">
+                      <img
+                        src={item.image}
+                        alt="Intel Thumbnail"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-all duration-500 opacity-80 group-hover:opacity-100"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          if (item.source === 'CRUNCHYROLL') {
+                            target.src = "https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=600";
+                          } else {
+                            target.src = "https://images.unsplash.com/photo-1580477667995-2b94f01c9516?q=80&w=600";
+                          }
+                        }}
+                      />
+                      <div className="absolute top-1.5 left-1.5 z-10">
+                        <span className="text-[7px] font-black uppercase text-white bg-crimson px-1.5 py-0.5 rounded tracking-widest leading-none select-none">
+                          {item.source === 'CRUNCHYROLL' ? 'CR' : 'ANN'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Content Section */}
+                    <div className="p-3 flex-1 flex flex-col justify-between gap-2.5 min-w-0">
+                      <h4 className="text-[10px] font-bold text-zinc-300 uppercase tracking-wide group-hover:text-crimson transition-all font-mono leading-relaxed line-clamp-3">
+                        {item.title}
+                      </h4>
+                      
+                      {/* Monospaced design footer */}
+                      <div className="text-[7px] uppercase tracking-widest text-[#A8A8B2]/60 flex flex-col gap-0.5 border-t border-white/5 pt-2 font-mono">
+                        <div className="font-extrabold text-[#FF0000]">
+                          [SOURCE: {item.source}]
+                        </div>
+                        <div className="text-[6.5px]">
+                          [TIME: {getRelativeTime(item.pubDate)}]
+                        </div>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="flex flex-col sm:flex-row sm:items-center justify-between mt-2 mb-4 border-b border-white/5 pb-3 gap-2 pb-3">
              <h2 className="text-xs font-mono font-black uppercase tracking-widest text-white flex items-center gap-2">
                <TrendingUp size={14} className="text-crimson" /> ANALYZING <span className="text-crimson">INTELLIGENCE FEED</span>
@@ -636,7 +900,7 @@ export default function Home() {
                     )}
 
                     <div>
-                      <Link to={`/news/${item.id}`} className="absolute inset-0 z-10" aria-label={`View ${item.title}`} />
+                      <a href={generateInternalLink(item.id)} className="absolute inset-0 z-10" aria-label={`View ${item.title}`} />
                       
                       {/* Visual floating pane image layout */}
                       <div className="h-44 w-full bg-black/60 rounded-lg overflow-hidden mb-4 relative border border-white/5 shadow-inner">
@@ -645,10 +909,15 @@ export default function Home() {
                            referrerPolicy="no-referrer"
                            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700 opacity-80 group-hover:opacity-100" 
                          />
-                         <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-20">
+                         <div className="absolute top-3 left-3 flex flex-col gap-1.5 z-20 items-start">
                            <span className="text-[8px] font-mono font-black text-white px-2 py-0.5 rounded tracking-widest bg-crimson shadow-[0_0_12px_rgba(229,9,20,0.5)] uppercase inline-block">
                              {item.category}
                            </span>
+                           {verifySignature(item.description || item.content || '').isValid && (
+                             <span className="text-[7px] font-mono font-black text-emerald-400 px-2 py-0.5 rounded tracking-widest bg-emerald-950/80 border border-emerald-500/30 uppercase inline-block shadow-[0_0_10px_rgba(16,185,129,0.3)]">
+                               ✔ [VERIFIED_ARCHITECT]
+                             </span>
+                           )}
 
                            {/* Match weights logic indicators */}
                            {item.relevanceMatch >= 88 ? (
@@ -795,6 +1064,85 @@ export default function Home() {
                 </motion.div>
               ))}
             </div>
+          </section>
+
+          {/* Personalized recommendations section */}
+          <section className="plexiglass rounded-xl p-5 hover-pulse border border-white/5 shadow-xl relative overflow-hidden">
+            <div className="absolute top-2 right-3 text-[7px] font-mono text-zinc-600 select-none pointer-events-none uppercase">
+              MODEL: GEMINI-3.5-FLASH // MODE: TARGET
+            </div>
+            <h3 className="text-xs font-mono font-black uppercase tracking-widest text-white mb-4 border-b border-white/5 pb-3 flex justify-between items-center text-zinc-300">
+              <span className="flex items-center gap-2 chromatic-text"><Sparkles size={14} className="text-crimson animate-pulse" /> AI TACTICAL RECOMMENDER</span>
+              <Link to="/for-you" className="text-[9px] font-mono text-zinc-500 hover:text-crimson tracking-widest font-black uppercase">[CUSTOM ARCHIVES]</Link>
+            </h3>
+
+            {cachedRecommendations.length === 0 ? (
+              <div className="text-center py-6 px-4 border border-dashed border-white/5 rounded-lg bg-black/25">
+                <p className="text-[10px] font-mono text-zinc-500 uppercase leading-relaxed mb-4">
+                  No personalized recommendation matrices compiled yet. Let prompt algorithms model your telemetry.
+                </p>
+                <Link
+                  to="/for-you"
+                  className="inline-block bg-crimson hover:bg-red-700 text-white font-mono text-[9px] font-black uppercase py-2 px-4 rounded transition-all tracking-wider border border-red-500"
+                >
+                  INITIALIZE COGNITIVE COUPLING
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-3.5">
+                {cachedRecommendations.slice(0, 3).map((rec, idx) => {
+                  const matchScores = [98, 95, 91];
+                  const match = matchScores[idx] || 88;
+                  
+                  return (
+                    <motion.div
+                      key={`${rec.mal_id}-${idx}`}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: idx * 0.08 }}
+                      className="bg-black/35 hover:bg-black/50 p-2.5 rounded-lg border border-white/[0.02] hover:border-red-500/20 flex gap-3 group relative transition-all duration-300"
+                    >
+                      <img
+                        src={rec.image || "https://cdn.myanimelist.net/images/anime/1066/141873.jpg"}
+                        alt=""
+                        className="w-10 h-14 bg-black/60 rounded object-cover border border-white/10 shrink-0"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div className="min-w-0 flex-1 flex flex-col justify-between py-0.5">
+                        <div className="font-mono">
+                          <Link to={`/anime/${rec.mal_id}`} className="text-xs font-black uppercase text-white hover:text-crimson transition-colors block truncate leading-snug">
+                            {rec.title}
+                          </Link>
+                          <div className="text-[8px] text-zinc-400 uppercase tracking-wide mt-0.5 max-w-full truncate">
+                            {rec.genres?.slice(0, 2).join(" • ") || "TACTICAL SOURCE"}
+                          </div>
+                        </div>
+                        <div className="text-[9px] font-mono mt-1 line-clamp-1 italic text-zinc-500">
+                          {rec.reason}
+                        </div>
+                      </div>
+                      <div className="text-right shrink-0 flex flex-col justify-center">
+                        <span className="text-[9px] text-[#FF0000] font-black font-mono tracking-tighter">{match}% MATCH</span>
+                        <Link
+                          to={`/anime/${rec.mal_id}`}
+                          className="text-[7px] text-zinc-500 hover:text-white uppercase font-mono tracking-widest mt-1 hover:underline"
+                        >
+                          INSPECT
+                        </Link>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+                <div className="text-center pt-2">
+                  <Link
+                    to="/for-you"
+                    className="text-[8px] font-mono text-zinc-600 hover:text-white transition-colors uppercase tracking-[0.2em]"
+                  >
+                    &raquo; BROWSE ALL 6 DESIGN DOSSIERS &laquo;
+                  </Link>
+                </div>
+              </div>
+            )}
           </section>
 
           <section className="plexiglass rounded-xl p-5 hover-pulse border border-white/5 shadow-xl relative overflow-hidden">

@@ -1,6 +1,31 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { Target, Users, Plus, Check, Award, Flame, Zap } from 'lucide-react';
+
+function TypewriterText({ text }: { text: string }) {
+  const [displayedText, setDisplayedText] = useState('');
+
+  useEffect(() => {
+    let index = 0;
+    setDisplayedText('');
+    const interval = setInterval(() => {
+      // Functional state update prevents stale closures
+      setDisplayedText((prev) => prev + text.charAt(index));
+      index++;
+      if (index >= text.length) {
+        clearInterval(interval);
+      }
+    }, 15); // Snappy decryption simulation
+    return () => clearInterval(interval);
+  }, [text]);
+
+  return (
+    <span className="font-mono text-xs text-rose-300 leading-relaxed drop-shadow-[0_0_8px_rgba(229,9,20,0.5)]">
+      {displayedText}
+      <span className="inline-block w-1.5 h-3.5 bg-crimson ml-1 animate-pulse" />
+    </span>
+  );
+}
 
 const SQUAD_DATA = [
   { id: 1, name: 'Cyberpunk Run Crew', anime: 'Cyberpunk: Edgerunners', members: 14, slots: 20, leader: 'David_Sandevistan', status: 'Streaming Now', goal: 'Watch Episodes 1-6 tonight' },
@@ -9,9 +34,27 @@ const SQUAD_DATA = [
 ];
 
 export default function SquadOps() {
-  const [joinedSquads, setJoinedSquads] = useState<number[]>([3]); // Start with one joined squad
+  const [joinedSquads, setJoinedSquads] = useState<number[]>(() => {
+    const saved = localStorage.getItem('nexus_joined_squads');
+    return saved ? JSON.parse(saved) : [3];
+  });
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [squads, setSquads] = useState(SQUAD_DATA);
+  const [squads, setSquads] = useState(() => {
+    const saved = localStorage.getItem('nexus_squads');
+    return saved ? JSON.parse(saved) : SQUAD_DATA;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('nexus_squads', JSON.stringify(squads));
+  }, [squads]);
+
+  useEffect(() => {
+    localStorage.setItem('nexus_joined_squads', JSON.stringify(joinedSquads));
+  }, [joinedSquads]);
+
+  // AI Briefing Tracking States
+  const [squadBriefings, setSquadBriefings] = useState<Record<number, string>>({});
+  const [loadingBriefings, setLoadingBriefings] = useState<Record<number, boolean>>({});
 
   // Form states for squad creation
   const [newSquadName, setNewSquadName] = useState('');
@@ -23,6 +66,37 @@ export default function SquadOps() {
       setJoinedSquads(prev => prev.filter(item => item !== id));
     } else {
       setJoinedSquads(prev => [...prev, id]);
+    }
+  };
+
+  const handleAnalyzeSquad = async (squadId: number, goal: string, anime: string) => {
+    if (loadingBriefings[squadId]) return;
+    setLoadingBriefings(prev => ({ ...prev, [squadId]: true }));
+    try {
+      const response = await fetch('/api/ai/briefing', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ squadGoal: goal, animeTitle: anime }),
+      });
+      const data = await response.json();
+      if (data.success && data.briefing) {
+        setSquadBriefings(prev => ({ ...prev, [squadId]: data.briefing }));
+      } else {
+        setSquadBriefings(prev => ({ 
+          ...prev, 
+          [squadId]: `Target identified: ${anime}. Objective: Decode neural feed failure. Warning: Encryption protocol compromised, retry sync.` 
+        }));
+      }
+    } catch (err) {
+      console.error('Tactical decryption stream error:', err);
+      setSquadBriefings(prev => ({ 
+        ...prev, 
+        [squadId]: `Target identified: ${anime}. Objective: Unscheduled link dropout recovery. Warning: Grid interference detected.` 
+      }));
+    } finally {
+      setLoadingBriefings(prev => ({ ...prev, [squadId]: false }));
     }
   };
 
@@ -111,33 +185,74 @@ export default function SquadOps() {
                 </span>
               </div>
 
-              {/* Task Goal description */}
-              <p className="text-xs text-zinc-400 leading-relaxed font-sans mb-5 bg-black/40 p-3.5 rounded-xl border border-white/5">
-                <span className="text-[7px] text-zinc-650 font-mono font-black uppercase block mb-1">CURRENT SQUAD GOAL</span>
-                {squad.goal}
-              </p>
+              {/* Task Goal or AI briefing decryption block */}
+              {squadBriefings[squad.id] ? (
+                <div role="status" className="text-xs leading-relaxed font-sans mb-5 bg-[#0e0204]/95 p-3.5 rounded-xl border border-crimson/30 shadow-[0_0_15px_rgba(229,9,20,0.15)] flex flex-col gap-2 min-h-[96px] justify-between">
+                  <div>
+                    <span className="text-[7px] text-crimson font-mono font-black uppercase block tracking-wider mb-1 animate-pulse">
+                      ▲ [DIRECTIVE DECRYPTED]
+                    </span>
+                    <TypewriterText text={squadBriefings[squad.id]} />
+                  </div>
+                  <span className="text-[7px] text-zinc-500 font-mono font-black block mt-2 tracking-widest border-t border-white/5 pt-1">
+                    [BRIEFING_STATUS: ENCRYPTED_DATA_DECRYPTED]
+                  </span>
+                </div>
+              ) : loadingBriefings[squad.id] ? (
+                <div className="text-xs leading-relaxed font-sans mb-5 bg-black/60 p-3.5 rounded-xl border border-white/10 flex flex-col justify-center items-center min-h-[96px]">
+                  <Zap size={14} className="text-crimson animate-spin mb-1.5" />
+                  <span className="text-[8px] font-mono font-black text-crimson animate-pulse tracking-widest">
+                    DECRYPTING INTEL FEED...
+                  </span>
+                </div>
+              ) : (
+                <div className="text-xs text-zinc-400 leading-relaxed font-sans mb-5 bg-black/40 p-3.5 rounded-xl border border-white/5 min-h-[96px] flex flex-col justify-between">
+                  <div>
+                    <span className="text-[7px] text-zinc-500 font-mono font-black uppercase block mb-1">
+                      CURRENT SQUAD GOAL
+                    </span>
+                    <p className="text-xs text-zinc-300 font-sans leading-relaxed">{squad.goal}</p>
+                  </div>
+                  <span className="text-[7px] text-zinc-650 font-mono block mt-2 tracking-widest">
+                    [BRIEFING_STATUS: ARMORED_ENCRYPTION_ACTIVE]
+                  </span>
+                </div>
+              )}
 
-              {/* Bottom Metadata & Join Action */}
-              <div className="flex items-center justify-between border-t border-white/5 pt-4 mt-auto font-mono text-[9px] text-zinc-450">
-                <div className="flex flex-col">
+              {/* Bottom Metadata & Tactical Actions */}
+              <div className="flex items-center justify-between border-t border-white/5 pt-4 mt-auto font-mono text-[9px] text-zinc-450 gap-2">
+                <div className="flex flex-col shrink-0">
                   <span className="text-zinc-550 flex items-center gap-1 font-bold">
                     <Users size={11} className="text-crimson" /> MEMBERS ({squad.members}/{squad.slots})
                   </span>
                   <span className="text-zinc-500 font-bold mt-0.5">LEADER: {squad.leader}</span>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleJoinSquad(squad.id)}
-                  className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1.5 transition-all ${
-                    isJoined
-                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                      : 'border-white/10 bg-black hover:bg-white/5 text-zinc-400 hover:text-white'
-                  }`}
-                >
-                  {isJoined ? <Check size={11} /> : <Plus size={10} />}
-                  {isJoined ? 'Joined' : 'Join watch'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleAnalyzeSquad(squad.id, squad.goal, squad.anime)}
+                    disabled={loadingBriefings[squad.id]}
+                    className="px-2.5 py-1.5 rounded-xl text-[9px] font-mono font-bold uppercase tracking-widest border border-crimson/30 bg-crimson/5 hover:bg-crimson/15 text-crimson hover:text-white transition-all disabled:opacity-50 cursor-pointer flex items-center gap-1 shrink-0"
+                    title="Run centralized mainframe tactical decryption analyzer"
+                  >
+                    <Zap size={10} className={loadingBriefings[squad.id] ? "animate-spin" : ""} />
+                    {loadingBriefings[squad.id] ? 'Syncing...' : 'Analyze'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleJoinSquad(squad.id)}
+                    className={`px-3 py-1.5 rounded-xl text-[9px] font-black uppercase tracking-widest flex items-center gap-1 transition-all shrink-0 ${
+                      isJoined
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                        : 'border-white/10 bg-black hover:bg-white/5 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {isJoined ? <Check size={10} /> : <Plus size={9} />}
+                    {isJoined ? 'Joined' : 'Join watch'}
+                  </button>
+                </div>
               </div>
             </div>
           );

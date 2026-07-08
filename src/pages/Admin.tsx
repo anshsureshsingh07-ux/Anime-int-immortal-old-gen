@@ -12,6 +12,7 @@ import { upgradeToPremium } from '../lib/profileSync';
 import { useNews } from '../App';
 import { BannerCropper } from '../components/BannerCropper';
 import { RecruitmentReview, checkAccess } from '../components/RecruitmentReview';
+import { generateSignature } from '../lib/signature';
 
 const fileToBase64 = (file: File): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -292,7 +293,8 @@ export default function Admin() {
       }
 
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'X-Zero-Trust-Token': sessionStorage.getItem("x-zero-trust-token") || ""
       };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -363,7 +365,8 @@ export default function Admin() {
       }
 
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'X-Zero-Trust-Token': sessionStorage.getItem("x-zero-trust-token") || ""
       };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -510,6 +513,8 @@ export default function Admin() {
   const [imageUrl, setImageUrl] = useState<string>('');
   const [isDragOver, setIsDragOver] = useState(false);
   const [cropperSrc, setCropperSrc] = useState<string | null>(null);
+  const [isScheduled, setIsScheduled] = useState(false);
+  const [scheduledFor, setScheduledFor] = useState('');
   const [newsForm, setNewsForm] = useState({
     title: '',
     description: '',
@@ -858,7 +863,8 @@ export default function Admin() {
       }
 
       const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'X-Zero-Trust-Token': sessionStorage.getItem("x-zero-trust-token") || ""
       };
       if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -901,23 +907,32 @@ export default function Admin() {
         .map(u => u.trim())
         .filter(u => u.length > 0);
 
+      const computedReleaseDate = isScheduled && scheduledFor 
+        ? new Date(scheduledFor).toISOString() 
+        : new Date().toISOString();
+
       const meta = {
         additionalImages: parsedAdditionalImages,
-        youtubeVideoUrl: newsForm.youtubeVideoUrl.trim()
+        youtubeVideoUrl: newsForm.youtubeVideoUrl.trim(),
+        isScheduled,
+        scheduledFor
       };
       
       const metaString = `\n\n<!--NEXUS_META:${JSON.stringify(meta)}-->`;
 
+      // Generate secure digital seal signature for Ansh Singh Architect
+      const signedDesc = generateSignature(newsForm.description);
+
       const insertPayload: any = {
         title: newsForm.title,
-        description: newsForm.description + metaString,
+        description: signedDesc + metaString,
         category: newsForm.category,
         image: finalImageUrl,
         image_url: finalImageUrl, // explicitly support both image and image_url keys as requested!
         is_pinned: newsForm.is_pinned || false,
         author_id: session.user.id,
         author_name: dbUser?.username || session.user.email?.split('@')[0] || 'Vanguard Agent',
-        created_at: new Date().toISOString()
+        created_at: computedReleaseDate
       };
 
       const payloadData = {
@@ -970,8 +985,8 @@ export default function Admin() {
       // Immediate Global State Push to reflect instantly on the UI/Marquee
       const instantPayload = {
         title: newsForm.title,
-        description: newsForm.description,
-        content: newsForm.description,
+        description: signedDesc,
+        content: signedDesc,
         category: newsForm.category,
         image: finalImageUrl,
         image_url: finalImageUrl,
@@ -982,7 +997,10 @@ export default function Admin() {
       if (newsForm.category?.toUpperCase() === 'BREAKING') {
         setBreakingNews({ id: 1, text: newsForm.title, title: newsForm.title });
       }
-      setActiveArticle(instantPayload);
+      // Only push to globally active view if it is not a scheduled future release
+      if (!isScheduled) {
+        setActiveArticle(instantPayload);
+      }
 
       setNewsForm({ 
         title: '', 
@@ -995,6 +1013,8 @@ export default function Admin() {
       });
       setImageFile(null);
       setImageUrl('');
+      setIsScheduled(false);
+      setScheduledFor('');
       setFormSuccess(true);
       fetchNews();
       setTimeout(() => setFormSuccess(false), 3000);
@@ -1021,14 +1041,29 @@ export default function Admin() {
 
   if (loading && session && !dbUser) return <div className="p-20 text-center font-mono">Synchronizing with mainframe...</div>;
   
-  if (!hasAdminPanelAccess) return (
-    <div className="max-w-2xl mx-auto px-8 py-40 text-center">
-       <AlertCircle size={64} className="mx-auto text-red-600 mb-8" />
-       <h1 className="text-3xl font-black uppercase tracking-tighter mb-4 italic">Access <span className="text-red-500">Denied</span></h1>
-       <p className="text-gray-500 font-mono text-sm uppercase tracking-widest">Neural clearance level insufficient. Sector restricted.</p>
-       <div className="mt-12 h-1 bg-white/5 rounded-full overflow-hidden">
-         <div className="w-[15%] h-full bg-red-600 animate-pulse"></div>
-       </div>
+  const zeroTrustToken = sessionStorage.getItem("x-zero-trust-token");
+  const isMfaVerified = !!zeroTrustToken;
+
+  // Implement Dev Environment or Architect User absolute bypass
+  const isBypassAllowed = process.env.NODE_ENV === 'development' || 
+                           (session?.user?.email?.toUpperCase() === 'ANSHSURESHSINGH07@GMAIL.COM') ||
+                           (session?.user?.email?.toUpperCase().startsWith('ANSHSURESHSINGH07'));
+
+  if (!isBypassAllowed && (!isMfaVerified || !hasAdminPanelAccess)) return (
+    <div className="max-w-xl mx-auto px-6 py-40 text-center font-mono animate-fade-in">
+      <h1 className="text-4xl font-extrabold text-zinc-800 tracking-tight mb-2">404</h1>
+      <p className="text-sm text-zinc-500 uppercase tracking-widest leading-relaxed mb-6">
+        [HTTP_STATUS: 404_NOT_FOUND] // Security Shield active. Connection closed.
+      </p>
+      <p className="text-xs text-zinc-600 uppercase max-w-sm mx-auto leading-relaxed mb-8">
+        This route does not exist on this directory server. Please access via secure gate.
+      </p>
+      <a 
+        href="/alpha-sector-9-override"
+        className="text-[10px] bg-red-600 hover:bg-red-750 px-4 py-2 text-white font-bold tracking-widest uppercase rounded-lg transition-all"
+      >
+        Authenticate Portal
+      </a>
     </div>
   );
 
@@ -1215,18 +1250,64 @@ export default function Admin() {
                        </div>
                     </div>
                     <div className="space-y-2">
-                        <div className="flex items-center gap-2 pt-2 pb-4 col-span-1 md:col-span-2">
-                           <input 
-                              type="checkbox"
-                              id="is_pinned"
-                              checked={newsForm.is_pinned}
-                              onChange={e => setNewsForm({...newsForm, is_pinned: e.target.checked})}
-                              className="w-4 h-4 accent-red-600 rounded bg-[#0a0a0a] border-white/10 cursor-pointer"
-                           />
-                           <label htmlFor="is_pinned" className="text-[10px] font-black uppercase text-gray-400 cursor-pointer select-none tracking-widest hover:text-white transition-colors">
-                             [PIN TRANSMISSION] Elevate this article on feed top
-                           </label>
+                        <div className="flex flex-wrap items-center gap-6 pt-2 pb-4 col-span-1 md:col-span-2">
+                           <div className="flex items-center gap-2">
+                              <input 
+                                 type="checkbox"
+                                 id="is_pinned"
+                                 checked={newsForm.is_pinned}
+                                 onChange={e => setNewsForm({...newsForm, is_pinned: e.target.checked})}
+                                 className="w-4 h-4 accent-red-600 rounded bg-[#0a0a0a] border-white/10 cursor-pointer"
+                              />
+                              <label htmlFor="is_pinned" className="text-[10px] font-black uppercase text-gray-400 cursor-pointer select-none tracking-widest hover:text-white transition-colors">
+                                [PIN TRANSMISSION] Elevate this article on feed top
+                              </label>
+                           </div>
+
+                           <div className="flex items-center gap-2">
+                              <input 
+                                 type="checkbox"
+                                 id="is_scheduled"
+                                 checked={isScheduled}
+                                 onChange={e => {
+                                   setIsScheduled(e.target.checked);
+                                   if (e.target.checked && !scheduledFor) {
+                                     const oneHourFromNow = new Date(Date.now() + 60 * 60 * 1000);
+                                     const offset = oneHourFromNow.getTimezoneOffset() * 60000;
+                                     const localISOTime = new Date(oneHourFromNow.getTime() - offset).toISOString().slice(0, 16);
+                                     setScheduledFor(localISOTime);
+                                   }
+                                 }}
+                                 className="w-4 h-4 accent-red-600 rounded bg-[#0a0a0a] border-white/10 cursor-pointer"
+                              />
+                              <label htmlFor="is_scheduled" className="text-[10px] font-black uppercase text-gray-400 cursor-pointer select-none tracking-widest hover:text-white transition-colors">
+                                [SCHEDULE TRANSMISSION] Delay launch to neural stream
+                              </label>
+                           </div>
                         </div>
+
+                        {isScheduled && (
+                          <div className="mb-4 space-y-2 bg-red-950/15 border border-red-500/30 p-4 rounded-xl max-w-md animate-fade-in">
+                            <label className="text-[9px] font-black uppercase text-red-400 block tracking-widest">
+                              ▲ SPECIFY CHRONOLOGICAL SYNC TIME
+                            </label>
+                            <div className="flex items-center gap-3">
+                              <input 
+                                 type="datetime-local" 
+                                 required={isScheduled}
+                                 value={scheduledFor}
+                                 onChange={e => setScheduledFor(e.target.value)}
+                                 className="bg-black border border-white/15 rounded-lg px-3 py-2 text-xs font-mono text-white focus:border-red-600 outline-none w-full"
+                              />
+                              <span className="text-[8px] font-mono whitespace-nowrap text-gray-500 uppercase">
+                                STATUS: DELAYED RELEASE
+                              </span>
+                            </div>
+                            <p className="text-[8px] font-mono text-gray-500 lowercase leading-relaxed mt-1">
+                              This item will remain locked from general public view and will automatically become available to all nodes on the news feeds precisely at the designated time.
+                            </p>
+                          </div>
+                        )}
                        <label className="text-[10px] font-black uppercase text-gray-500">Content Matrix</label>
                        <textarea 
                           required
@@ -1261,7 +1342,14 @@ export default function Admin() {
                                 <img src={item.image || undefined} className="w-full h-full object-cover group-hover:scale-125 transition-transform duration-500" />
                               </div>
                               <div>
-                                <h4 className="text-xs font-bold uppercase text-white group-hover:text-red-500 transition-colors">{item.title}</h4>
+                                <h4 className="text-xs font-bold uppercase text-white group-hover:text-red-500 transition-colors flex flex-wrap items-center gap-2">
+                                  {item.title}
+                                  {new Date(item.created_at) > new Date() && (
+                                    <span className="text-[7.5px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20 uppercase tracking-wider font-extrabold animate-pulse">
+                                      [SCHEDULED RELEASE: {new Date(item.created_at).toLocaleString()}]
+                                    </span>
+                                  )}
+                                </h4>
                                 <span className="text-[8px] font-mono text-gray-600 uppercase italic">{item.category} • {item.author_name}</span>
                               </div>
                           </div>

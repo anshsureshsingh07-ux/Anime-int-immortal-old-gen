@@ -36,6 +36,7 @@ CREATE TABLE applications (
   skills TEXT,
   experience TEXT,
   availability TEXT,
+  is_guest BOOLEAN DEFAULT false,
   status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -146,7 +147,7 @@ CREATE POLICY "Admins can manage all profiles" ON profiles FOR ALL
 
 -- 11. RLS Policies for Applications
 CREATE POLICY "Users can see own applications" ON applications FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "Users can submit applications" ON applications FOR INSERT WITH CHECK (auth.uid() = user_id);
+CREATE POLICY "Anyone can submit applications" ON applications FOR INSERT WITH CHECK (true);
 CREATE POLICY "Admins can manage applications" ON applications FOR ALL 
   USING (
     EXISTS (SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND (profiles.role = 'admin' OR profiles.role = 'moderator'))

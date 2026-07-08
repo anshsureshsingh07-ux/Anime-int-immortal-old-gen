@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { getWatchlist, removeFromWatchlist, WatchlistItem } from '../lib/watchlist';
-import { getStoredProfileExt, calculateLevel, syncAndEnrichProfile, awardXP } from '../lib/profileSync';
+import { getStoredProfileExt, calculateLevel, syncAndEnrichProfile, awardXP, isUUID } from '../lib/profileSync';
 import { VerifiedBadge } from '../components/VerifiedBadge';
 import Cropper from 'react-easy-crop';
 
@@ -630,30 +630,61 @@ export default function Profile() {
   }, [fbUser]);
 
   const fetchProfileById = async (userId: string) => {
-    // Look up user_profiles first for the avatar profile image to support long-term persistence
-    let userProfilesAvatar: string | null = null;
-    try {
-      const { data: upData } = await supabase
-        .from('user_profiles')
-        .select('avatar_public_url')
-        .eq('user_id', userId)
-        .maybeSingle();
-      if (upData?.avatar_public_url) {
-        userProfilesAvatar = upData.avatar_public_url;
+    const isUserUUID = isUUID(userId);
+    const currentEmail = auth.currentUser?.email || fbUser?.email;
+
+    // Fetch from user_avatars database table as requested
+    let userAvatarsUrl: string | null = null;
+    if (isUserUUID) {
+      try {
+        const { data: uaData } = await supabase
+          .from('user_avatars')
+          .select('avatar_url')
+          .eq('id', userId)
+          .single();
+        if (uaData?.avatar_url) {
+          userAvatarsUrl = uaData.avatar_url;
+        }
+      } catch (uaErr) {
+        console.log('user_avatars fetch notice:', uaErr);
       }
-    } catch (upErr) {
-      console.warn('user_profiles query bypassed/failed on startup:', upErr);
     }
 
-    // Try reading the cached avatar, prioritizing user_profiles DB row, then falling back to localStorage
-    const cachedAvatar = userProfilesAvatar || localStorage.getItem(`cached_avatar_url_${userId}`);
+    // Look up user_profiles first for the avatar profile image to support long-term persistence
+    let userProfilesAvatar: string | null = null;
+    if (isUserUUID) {
+      try {
+        const { data: upData } = await supabase
+          .from('user_profiles')
+          .select('avatar_public_url')
+          .eq('user_id', userId)
+          .maybeSingle();
+        if (upData?.avatar_public_url) {
+          userProfilesAvatar = upData.avatar_public_url;
+        }
+      } catch (upErr) {
+        console.warn('user_profiles query bypassed/failed on startup:', upErr);
+      }
+    }
 
-    const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
-    let profileData = data;
-    const currentEmail = auth.currentUser?.email || fbUser?.email;
+    // Try reading the cached avatar, prioritizing user_avatars, then user_profiles, then falling back to localStorage
+    const cachedAvatar = userAvatarsUrl || userProfilesAvatar || localStorage.getItem(`cached_avatar_url_${userId}`);
+
+    let profileData = null;
+    if (isUserUUID) {
+      const { data } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      profileData = data;
+    } else if (currentEmail) {
+      try {
+        const { data } = await supabase.from('profiles').select('*').eq('email', currentEmail).single();
+        profileData = data;
+      } catch (err) {
+        console.log('No profiles found by email fallback in Profile page:', err);
+      }
+    }
     
     if (profileData) {
-      profileData = await syncAndEnrichProfile(profileData, userId);
+      profileData = await syncAndEnrichProfile(profileData, profileData.id || userId);
     } else {
       profileData = await syncAndEnrichProfile({ id: userId, email: currentEmail }, userId);
     }
@@ -673,7 +704,7 @@ export default function Profile() {
         username: profileData.username || '', 
         avatar_url: cachedAvatar || profileData.profile_photo_url || profileData.avatar_url || '' 
       });
-      fetchUserFaction(userId);
+      fetchUserFaction(profileData.id || userId);
     }
     setLoading(false);
   };
@@ -779,39 +810,51 @@ export default function Profile() {
     setMsg({ type: '', text: '' });
 
     try {
-      // Use the user's ID as folder name to conform strictly with RLS / storage policies
-      const randomSeed = Math.random().toString(36).substring(2);
-      const filePath = `${profile.id}/${randomSeed}.png`;
-
-      // Use the server-side /api/upload proxy which runs as service role / master client
-      const { data: { session: currentSession } } = await supabase.auth.getSession();
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json'
-      };
-      if (currentSession?.access_token) {
-        headers['Authorization'] = `Bearer ${currentSession.access_token}`;
+      // 1. Convert base64 string to a Blob/File object
+      let file: Blob;
+      if (base64String.startsWith('data:')) {
+        const responseBlob = await fetch(base64String);
+        file = await responseBlob.blob();
+      } else {
+        const byteCharacters = atob(base64String);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        file = new Blob([byteArray], { type: 'image/png' });
       }
 
-      const response = await fetch('/api/upload', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          bucket: 'avatar',
-          fileName: filePath,
-          fileData: base64String,
+      // Upload using the Supabase Storage client
+      const { data: uploadData, error: uploadErr } = await supabase.storage
+        .from('avatar')
+        .upload(`public/${profile.id}`, file, {
+          upsert: true,
           contentType: 'image/png'
-        })
-      });
+        });
 
-      if (!response.ok) {
-        const resError = await response.json();
-        throw new Error(resError.error || 'Server upload proxy failed');
+      if (uploadErr) {
+        throw uploadErr;
       }
 
-      const { publicUrl } = await response.json();
+      // Then get the public URL
+      const { data: publicUrlData } = supabase.storage
+        .from('avatar')
+        .getPublicUrl(`public/${profile.id}`);
+
+      const publicUrl = publicUrlData?.publicUrl;
 
       if (!publicUrl) {
         throw new Error('Verification failure: Public URL generation rejected from backend.');
+      }
+
+      // Save the URL to user_avatars table
+      try {
+        await supabase
+          .from('user_avatars')
+          .upsert({ id: profile.id, avatar_url: publicUrl });
+      } catch (dbErr) {
+        console.warn('user_avatars database sync notice:', dbErr);
       }
 
       // 2. Fallback double updates to keep other tables in exact parity

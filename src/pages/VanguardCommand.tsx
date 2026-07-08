@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { ShieldAlert, Server, Activity, Terminal, RefreshCw, ZapOff, Play } from 'lucide-react';
 import { playDigitalSound } from '../lib/sounds';
+import ReconComponent from '../components/ReconComponent';
 
 interface CommandLog {
   id: string;
@@ -158,6 +159,9 @@ export default function VanguardCommand() {
           </span>
         </div>
       </div>
+
+      {/* Neural Reconnaissance Matrix */}
+      <ReconComponent onLogTriggered={(log) => setAdminLogs(prev => [log, ...prev])} />
 
       {/* Control Action Tools & live logs */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-stretch">

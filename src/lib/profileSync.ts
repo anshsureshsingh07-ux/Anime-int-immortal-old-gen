@@ -1,5 +1,10 @@
 import { supabase } from './supabase';
 
+export const isUUID = (str: any): boolean => {
+  if (typeof str !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+};
+
 export interface EnhancedProfile {
   id: string;
   username: string;
@@ -86,18 +91,20 @@ export async function syncAndEnrichProfile(rawDbProfile: any, userId: string): P
   saveStoredProfileExt(userId, { xp, level, is_premium, premium_tier });
 
   // Try updating the DB as a background or fire-and-forget sync
-  try {
-    await supabase
-      .from('profiles')
-      .update({
-        xp,
-        level,
-        is_premium,
-        premium_tier
-      })
-      .eq('id', userId);
-  } catch (dbErr) {
-    console.warn('Silent notice: Supabase columns sync fallback active:', dbErr);
+  if (isUUID(userId)) {
+    try {
+      await supabase
+        .from('profiles')
+        .update({
+          xp,
+          level,
+          is_premium,
+          premium_tier
+        })
+        .eq('id', userId);
+    } catch (dbErr) {
+      console.warn('Silent notice: Supabase columns sync fallback active:', dbErr);
+    }
   }
 
   return {
@@ -120,8 +127,10 @@ export async function syncAndEnrichProfile(rawDbProfile: any, userId: string): P
 // Award XP helper which handles appropriate Premium Boost multipliers
 export async function awardXP(userId: string, amount: number): Promise<EnhancedProfile | null> {
   try {
-    // Fetch profile first
-    const { data: rawDbProfile } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    // Fetch profile first if userId is a valid UUID
+    const rawDbProfile = isUUID(userId)
+      ? (await supabase.from('profiles').select('*').eq('id', userId).single()).data
+      : null;
     const current = getStoredProfileExt(userId);
     
     // Check is_premium & boost multipliers
@@ -167,7 +176,9 @@ export async function awardXP(userId: string, amount: number): Promise<EnhancedP
 // Upgrade user to designated subscription tier (returns updated profile info)
 export async function upgradeToPremium(userId: string, tier: 'none' | 'plus' | 'god' | 'monarch' = 'monarch'): Promise<EnhancedProfile | null> {
   try {
-    const { data: rawDbProfile } = await supabase.from('profiles').select('*').eq('id', userId).single();
+    const rawDbProfile = isUUID(userId)
+      ? (await supabase.from('profiles').select('*').eq('id', userId).single()).data
+      : null;
     const current = getStoredProfileExt(userId);
 
     const email = rawDbProfile?.email || null;

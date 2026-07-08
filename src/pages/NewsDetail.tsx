@@ -1,17 +1,43 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Calendar, User, Share2, Clock, ShieldCheck, Tag } from 'lucide-react';
+import { ArrowLeft, Calendar, User, Share2, Clock, ShieldCheck, Tag, Lock, ShieldAlert } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useNews } from '../App';
+import SignatureVerifiedBlock from '../components/SignatureVerifiedBlock';
+import ShareModule from '../components/ShareModule';
+import RelatedNewsModule from '../components/RelatedNewsModule';
+import { generateInternalLink } from '../utils/urlFormatter';
 
 export default function NewsDetail() {
   const { id } = useParams();
   const { setActiveArticle } = useNews();
   const [article, setArticle] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [isShareOpen, setIsShareOpen] = useState(false);
   const [activeImgIndex, setActiveImgIndex] = useState(0);
+  const [isEmbargoed, setIsEmbargoed] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState('');
   const navigate = useNavigate();
+
+  const checkAdminPrivileges = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const adminEmails = ["anshsureshsingh07@gmail.com", "animeintofficial@gmail.com"];
+        if (adminEmails.includes(user.email?.toLowerCase() || "")) {
+          return true;
+        }
+        const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+        if (profile && ["admin", "news_writer", "moderator"].includes(profile.role)) {
+          return true;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed checking admin privileges in NewsDetail:", e);
+    }
+    return false;
+  };
 
   // Helper to extract clean youtube embed URL or ID
   const getYoutubeEmbedId = (url: string) => {
@@ -86,11 +112,53 @@ export default function NewsDetail() {
       return;
     }
 
+    const isFuture = new Date(data.created_at) > new Date();
+    if (isFuture) {
+      const allowed = await checkAdminPrivileges();
+      if (!allowed) {
+        setIsEmbargoed(true);
+        setArticle(data);
+        setLoading(false);
+        return;
+      }
+    }
+
     setArticle(data);
     setActiveArticle(data);
     setActiveImgIndex(0);
     setLoading(false);
   };
+
+  useEffect(() => {
+    if (!isEmbargoed || !article) return;
+
+    const calculateTime = () => {
+      const distance = new Date(article.created_at).getTime() - Date.now();
+      if (distance <= 0) {
+        setIsEmbargoed(false);
+        return false;
+      }
+
+      const hours = Math.floor(distance / (1000 * 60 * 60));
+      const minutes = Math.floor((distance % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((distance % (1000 * 60)) / 1000);
+
+      setTimeRemaining(
+        `${hours.toString().padStart(2, '0')}H ${minutes
+          .toString()
+          .padStart(2, '0')}M ${seconds.toString().padStart(2, '0')}S`
+      );
+      return true;
+    };
+
+    calculateTime();
+    const interval = setInterval(() => {
+      const active = calculateTime();
+      if (!active) clearInterval(interval);
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isEmbargoed, article]);
 
   if (loading) {
     return (
@@ -99,6 +167,74 @@ export default function NewsDetail() {
             <div className="w-16 h-16 border-t-2 border-red-600 rounded-full animate-spin mx-auto" />
             <p className="text-[10px] font-mono text-gray-500 uppercase tracking-[0.4em] animate-pulse">Decrypting Transmission...</p>
         </div>
+      </div>
+    );
+  }
+
+  if (isEmbargoed && article) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-black text-white px-6">
+        <div className="fixed inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-red-600/5 rounded-full blur-[140px]" />
+        </div>
+        
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-md w-full bg-zinc-950/85 border border-red-500/20 rounded-[2rem] p-8 backdrop-blur-xl relative overflow-hidden text-center space-y-6 shadow-[0_0_50px_rgba(239,68,68,0.05)]"
+        >
+          {/* Accent Line */}
+          <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-transparent via-red-600 to-transparent" />
+          
+          <div className="mx-auto w-16 h-16 bg-red-600/10 border border-red-600/20 rounded-2xl flex items-center justify-center text-red-500 animate-pulse">
+            <Lock size={30} />
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-[10px] font-mono font-black text-red-500 tracking-[0.3em] uppercase block">
+              ▲ CHRONOLOGICAL EMBARGO GATES ACTIVE
+            </span>
+            <h1 className="text-xl font-black uppercase tracking-tight text-white italic">
+              {article.title}
+            </h1>
+            <p className="text-[10px] text-gray-500 font-mono uppercase">
+              TRANSMISSION LOCKED UNTIL REGISTERED TIME REACHED
+            </p>
+          </div>
+
+          <div className="py-6 border-y border-white/5 space-y-2">
+            <span className="text-[9px] font-mono text-gray-500 uppercase block tracking-widest">
+              LAUNCH ETA countdown
+            </span>
+            <div className="text-3xl font-mono text-red-500 font-black tracking-widest animate-pulse">
+              {timeRemaining || "COMPUTING TIME..."}
+            </div>
+          </div>
+
+          <div className="text-left bg-black/40 border border-white/5 rounded-xl p-4 space-y-2 font-mono text-[9px] text-gray-400 uppercase">
+            <div>
+              <span className="text-gray-650">BROADCAST SOURCE:</span> {article.author_name}
+            </div>
+            <div>
+              <span className="text-gray-650">SCHEDULED RELEASE:</span> {new Date(article.created_at).toLocaleString()}
+            </div>
+            <div>
+              <span className="text-gray-650">TELEMETRY TYPE:</span> {article.category}
+            </div>
+          </div>
+
+          <div className="pt-4 flex flex-col gap-3">
+            <Link 
+              to="/news"
+              className="w-full bg-white/5 border border-white/10 hover:border-white/20 text-white py-3 rounded-full text-[10px] font-black uppercase tracking-widest transition-all block text-center hover:bg-white/10"
+            >
+              RETURN TO INDEX
+            </Link>
+            <p className="text-[7.5px] font-mono text-gray-600 lowercase leading-relaxed">
+              If you are a certified server operator / network writer, ensure you are fully authenticated in active session terminal profiles before bypassing chronological streams.
+            </p>
+          </div>
+        </motion.div>
       </div>
     );
   }
@@ -124,7 +260,11 @@ export default function NewsDetail() {
             Back to Feed
           </Link>
           <div className="flex items-center gap-4">
-             <button className="p-2 text-gray-500 hover:text-white transition-colors">
+             <button 
+               onClick={() => setIsShareOpen(true)}
+               className="p-2 text-gray-500 hover:text-white hover:text-[#00ffff] hover:drop-shadow-[0_0_10px_rgba(0,255,255,0.8)] transition-all cursor-pointer"
+               title="Uplink Share Interface"
+             >
                 <Share2 size={18} />
              </button>
           </div>
@@ -203,11 +343,14 @@ export default function NewsDetail() {
         {/* Article Body */}
         <article className="prose prose-invert max-w-none">
           <div className="space-y-8 text-lg md:text-xl text-gray-300 font-medium leading-relaxed tracking-tight">
-            {cleanDescription?.split('\n').map((paragraph: string, i: number) => (
-              <p key={i} className={i === 0 ? "text-white first-letter:text-5xl first-letter:font-black first-letter:text-red-600 first-letter:mr-3 first-letter:float-left" : ""}>
-                {paragraph}
-              </p>
-            ))}
+            {cleanDescription?.split('\n').map((paragraph: string, i: number) => {
+              const isFirst = i === 0;
+              return (
+                <div key={i} className={isFirst ? "text-white first-letter:text-5xl first-letter:font-black first-letter:text-red-600 first-letter:mr-3 first-letter:float-left mb-6" : "mb-6"}>
+                  <SignatureVerifiedBlock content={paragraph} />
+                </div>
+              );
+            })}
           </div>
         </article>
 
@@ -315,6 +458,8 @@ export default function NewsDetail() {
           </div>
         )}
 
+        <RelatedNewsModule currentArticle={article} />
+
         {/* Footer Meta */}
         <footer className="mt-24 pt-12 border-t border-white/5">
            <div className="flex flex-wrap gap-4">
@@ -334,6 +479,13 @@ export default function NewsDetail() {
            </div>
         </footer>
       </div>
+
+      <ShareModule 
+        isOpen={isShareOpen} 
+        onClose={() => setIsShareOpen(false)} 
+        title={article?.title || 'Neural Broadcast Archive'} 
+        customUrl={id ? generateInternalLink(id) : undefined}
+      />
     </div>
   );
 }

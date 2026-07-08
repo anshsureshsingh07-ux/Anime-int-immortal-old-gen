@@ -991,8 +991,8 @@ export default function HouseCards() {
                   onClick={() => {
                     handleCardClickAndActivate(house);
                   }}
-                  onMouseMove={(e) => handleCardMouseMove(e, house.id)}
-                  onMouseLeave={handleCardMouseLeave}
+                  onPointerMove={(e) => handleCardMouseMove(e, house.id)}
+                  onPointerLeave={handleCardMouseLeave}
                   className={`
                     relative rounded-[1.8rem] border p-6 bg-gradient-to-br ${house.bgGradient}
                     backdrop-blur-md bg-opacity-75 border-white/10 shadow-[0_12px_35px_rgba(0,0,0,0.5)]

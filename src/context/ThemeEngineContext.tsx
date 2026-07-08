@@ -78,8 +78,9 @@ function ToastItem({ toast, onRemove }: { toast: ToastMessage; onRemove: () => v
 
   return (
     <div
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      onPointerDown={() => setIsHovered(true)}
+      onPointerUp={() => setIsHovered(false)}
+      onPointerLeave={() => setIsHovered(false)}
       className={`pointer-events-auto w-full border ${borderClass} p-3.5 rounded-xl shadow-[0_10px_35px_rgba(0,0,0,0.65)] [box-shadow:0_0_20px_rgba(0,0,0,0.8),_inset_0_1px_1px_rgba(255,255,255,0.05)] flex flex-col gap-2 relative overflow-hidden backdrop-blur-md transition-all duration-300 transform hover:scale-[1.015]`}
     >
       <div className="flex items-start justify-between gap-3">

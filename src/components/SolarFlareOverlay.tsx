@@ -5,7 +5,10 @@ interface SolarFlareOverlayProps {
 }
 
 export default function SolarFlareOverlay({ active }: SolarFlareOverlayProps) {
-  if (!active) return null;
+  const isMobile = typeof window !== 'undefined' && 
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(window.navigator.userAgent);
+
+  if (!active || isMobile) return null;
 
   return (
     <>

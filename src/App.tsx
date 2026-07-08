@@ -1,13 +1,16 @@
-import { useState, useEffect, createContext, useContext } from 'react';
+import { useState, useEffect, createContext, useContext, useRef } from 'react';
 import { ThemeEngineProvider, useThemeEngine } from './context/ThemeEngineContext';
+import { useUser } from './context/UserContext';
 import { playDigitalSound } from './lib/sounds';
 import { 
   BrowserRouter as Router, 
   Routes, 
   Route, 
   Link, 
-  useLocation 
+  useLocation,
+  useNavigate
 } from 'react-router-dom';
+import { extractIdFromInternalLink } from './utils/urlFormatter';
 import { 
   Home as HomeIcon, 
   Database as DatabaseIcon, 
@@ -45,16 +48,19 @@ import {
   Settings2,
   Archive,
   Cpu,
-  ChevronDown
+  ChevronDown,
+  HelpCircle,
+  Palette
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
-import { syncAndEnrichProfile, getStoredProfileExt, upgradeToPremium } from './lib/profileSync';
+import { syncAndEnrichProfile, getStoredProfileExt, upgradeToPremium, isUUID } from './lib/profileSync';
 import Leaderboard from './pages/Leaderboard';
 import { Navigate } from 'react-router-dom';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { auth, registerPushNotifications } from './lib/firebase';
 import { CommandPalette } from './components/CommandPalette';
+import TourGuide from './components/TourGuide';
 
 // Pages
 import Home from './pages/Home';
@@ -68,6 +74,8 @@ import DataRelay from './pages/DataRelay';
 import SquadOps from './pages/SquadOps';
 import TerminalLogs from './pages/TerminalLogs';
 import NodeSettings from './pages/NodeSettings';
+import ForYou from './pages/ForYou';
+import Community from './pages/Community';
 
 // God-Level Mainframe Pages
 import CoreProcessingUnit from './pages/CoreProcessingUnit';
@@ -425,6 +433,32 @@ const getFactionStyleCSS = (factionName?: string, isSummerActive?: boolean) => {
         text-shadow: 0 0 12px rgba(255, 215, 0, 0.6) !important;
       }
     `;
+  } else if (name.includes('emerald') || name.includes('matrix') || name.includes('green')) {
+    primary = '#10B981';
+    primaryGlow = 'rgba(16, 185, 129, 0.45)';
+    bg = '#020e09';
+    panelBg = '#061a12';
+    border = '#10B981';
+    extraStyles = `
+      body, #root, .flex.h-screen {
+        background-color: #020e09 !important;
+      }
+      ::-webkit-scrollbar-thumb, .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #10B981 !important;
+      }
+      * {
+        scrollbar-color: #10B981 #061a12 !important;
+      }
+      /* neon emerald grid terminal layout */
+      aside, .cyber-card, .faction-themed-panel {
+        background-color: #04140e !important;
+        border: 1px solid rgba(16, 185, 129, 0.4) !important;
+        box-shadow: 0 0 15px rgba(16, 185, 129, 0.15) !important;
+      }
+      h1, h2, h3, .title-text {
+        text-shadow: 0 0 12px rgba(16, 185, 129, 0.6) !important;
+      }
+    `;
   }
 
   return `
@@ -479,9 +513,12 @@ import ResetPassword from './pages/ResetPassword';
 import News from './pages/News';
 import Profile from './pages/Profile';
 import NewsDetail from './pages/NewsDetail';
+import Announcements from './pages/Announcements';
 import LegalPage from './pages/Legal';
 import HouseCards from './pages/HouseCards';
 import SolarFlareOverlay from './components/SolarFlareOverlay';
+import ZeroTrustPortal from './pages/ZeroTrustPortal';
+import CodeConsole from './pages/CodeConsole';
 
 export interface NewsContextType {
   activeArticle: any | null;
@@ -515,14 +552,81 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const isActualAdmin = firebaseUser && firebaseUser.email === 'anshsureshsingh07@gmail.com';
   const [supabaseSession, setSupabaseSession] = useState<any>(null);
   const [dbUser, setDbUser] = useState<any>(null);
+  const { avatarUrl, verifyUserIdentity, setUser, setTradingProfile } = useUser();
   const [headerLocalBlob, setHeaderLocalBlob] = useState<string>('');
   const [currentUserFaction, setCurrentUserFaction] = useState<any>(() => {
-    const cachedName = localStorage.getItem('active_faction_name');
-    return cachedName ? { faction_name: cachedName, faction_rank: 'Legionnaire', faction_xp: 100 } : null;
+    const cachedName = localStorage.getItem('active_faction_name') || localStorage.getItem('vanguard_custom_preset_theme') || 'akatsuki';
+    return { faction_name: cachedName || 'akatsuki', faction_rank: 'Legionnaire', faction_xp: 100 };
   });
   const [isStarkSummer, setIsStarkSummer] = useState(() => localStorage.getItem('stark_summer_active') === 'true');
   const [loadingAuth, setLoadingAuth] = useState(true);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  // Intercept Vanguard absolute AIF news links globally for seamless SPA transition
+  useEffect(() => {
+    const handleGlobalClick = (e: MouseEvent) => {
+      let target = e.target as HTMLElement | null;
+      while (target && target.tagName !== 'A') {
+        target = target.parentElement;
+      }
+      if (target && target.tagName === 'A') {
+        const href = target.getAttribute('href');
+        if (href) {
+          const matchId = extractIdFromInternalLink(href);
+          if (matchId) {
+            e.preventDefault();
+            playDigitalSound('ping');
+            navigate(`/news/${matchId}`);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('click', handleGlobalClick);
+    return () => window.removeEventListener('click', handleGlobalClick);
+  }, [navigate]);
+
+  // Mobile Sync telemetry setup
+  const [isMobileDevice] = useState(() => {
+    if (typeof window !== 'undefined' && window.navigator && window.navigator.userAgent) {
+      return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(window.navigator.userAgent);
+    }
+    return false;
+  });
+
+  const [mobileErrors, setMobileErrors] = useState<string[]>([]);
+
+  useEffect(() => {
+    const handleGlobalError = (event: ErrorEvent) => {
+      const errorMsg = event.message || "UNKNOWN_ERROR_EVENT";
+      const errorId = errorMsg.toUpperCase().replace(/[^A-Z0-9]/g, '_').slice(0, 15);
+      setMobileErrors(prev => [...prev, `[ERR_CODE: ${errorId}_${Date.now() % 1000}]`].slice(-5));
+    };
+
+    const handlePromiseRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason?.message || event.reason || "REJECTION";
+      const errorId = String(reason).toUpperCase().replace(/[^A-Z0-9]/g, '_').slice(0, 15);
+      setMobileErrors(prev => [...prev, `[ERR_CODE: ${errorId}_${Date.now() % 1000}]`].slice(-5));
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('error', handleGlobalError);
+      window.addEventListener('unhandledrejection', handlePromiseRejection);
+      (window as any).logMobileError = (code: string) => {
+        const formatted = code.toUpperCase().replace(/[^A-Z0-9_]/g, '_').slice(0, 15);
+        setMobileErrors(prev => [...prev, `[ERR_CODE: ${formatted}]`].slice(-5));
+      };
+      console.log("[Mobile-Sync Setup] Core performance optimizations and audit telemetry initialized; mobileDevice=" + isMobileDevice);
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('error', handleGlobalError);
+        window.removeEventListener('unhandledrejection', handlePromiseRejection);
+      }
+    };
+  }, [isMobileDevice]);
 
   // Void Descent Cinematic Entry states
   const [descentState, setDescentState] = useState<'flash' | 'descending' | 'settled'>('flash');
@@ -574,6 +678,23 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const [securityGlitch, setSecurityGlitch] = useState(false);
   const [isInactive, setIsInactive] = useState(false);
   const [securityPingCount, setSecurityPingCount] = useState(0);
+  const [isArchitect, setIsArchitect] = useState(
+    sessionStorage.getItem('architect_key') === 'ANSH_SINGH'
+  );
+
+  useEffect(() => {
+    const checkArchitect = () => {
+      setIsArchitect(sessionStorage.getItem('architect_key') === 'ANSH_SINGH');
+    };
+    checkArchitect();
+    window.addEventListener('storage', checkArchitect);
+    // Periodically poll to stay reactive in single-page session transitions
+    const pollInterval = setInterval(checkArchitect, 1000);
+    return () => {
+      window.removeEventListener('storage', checkArchitect);
+      clearInterval(pollInterval);
+    };
+  }, []);
 
   // Periodic security glitch trigger
   useEffect(() => {
@@ -593,6 +714,17 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
     return () => clearInterval(interval);
   }, []);
+
+  const [isTourOpen, setIsTourOpen] = useState(false);
+
+  useEffect(() => {
+    if (descentState === 'settled') {
+      const hasCompleted = localStorage.getItem('nexus_mainframe_tour_completed') === 'true';
+      if (!hasCompleted) {
+        setIsTourOpen(true);
+      }
+    }
+  }, [descentState]);
 
   // Idle Standby Controller (Dims screen upon 40 seconds of absolute zero activity)
   useEffect(() => {
@@ -620,6 +752,99 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       window.removeEventListener('click', resetIdleTimer);
     };
   }, []);
+
+  // Toast notifications for real-time news broadcasts
+  const [activeToast, setActiveToast] = useState<{
+    id: string;
+    title: string;
+    category: string;
+    image_url?: string;
+  } | null>(null);
+
+  const shownToastsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    // We subscribe to 'news_channel'
+    const channel = supabase.channel('news_channel', {
+      config: {
+        broadcast: { self: true }
+      }
+    });
+
+    // Subscribing to custom broadcast event: 'new_news'
+    channel.on('broadcast', { event: 'new_news' }, ({ payload }) => {
+      console.log('Real-time news broadcast received:', payload);
+      if (payload && payload.title) {
+        // Prevent duplicate toasts on the same client
+        if (shownToastsRef.current.has(payload.id)) {
+          return;
+        }
+        shownToastsRef.current.add(payload.id);
+
+        // Trigger toast
+        setActiveToast({
+          id: payload.id,
+          title: payload.title,
+          category: payload.category || 'Trending',
+          image_url: payload.image_url || payload.image
+        });
+        
+        // Play digital ping notification sound!
+        try {
+          playDigitalSound('ping');
+        } catch (soundErr) {
+          console.warn('Notification sound failed', soundErr);
+        }
+      }
+    });
+
+    // Subscribing to postgres_changes for table: news on insert
+    channel.on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'news' },
+      (payload) => {
+        console.log('Postgres change news INSERT received:', payload);
+        if (payload?.new) {
+          // Send broadcast. To avoid all clients sending it, ONLY the user who is an admin, news_writer, or author broadcasts it.
+          const userRole = dbUser?.role || 'member';
+          const canBroadcast = isActualAdmin || userRole === 'admin' || userRole === 'news_writer' || payload.new.author_id === (supabaseSession?.user?.id || firebaseUser?.uid);
+          
+          if (canBroadcast) {
+            channel.send({
+              type: 'broadcast',
+              event: 'new_news',
+              payload: {
+                id: payload.new.id,
+                title: payload.new.title,
+                category: payload.new.category || 'Trending',
+                image_url: payload.new.image_url || payload.new.image
+              }
+            }).catch(broadcastErr => {
+              console.error('Error sending news broadcast:', broadcastErr);
+            });
+          }
+        }
+      }
+    );
+
+    channel.subscribe((status) => {
+      console.log('Realtime news_channel subscription status:', status);
+    });
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabaseSession, firebaseUser, dbUser, isActualAdmin]);
+
+  // Toast Auto-Dismiss
+  useEffect(() => {
+    if (activeToast) {
+      const timer = setTimeout(() => {
+        setActiveToast(null);
+      }, 7000); // Pops up for 7 seconds
+      return () => clearTimeout(timer);
+    }
+  }, [activeToast]);
 
   // News global states
   const [activeArticle, setActiveArticle] = useState<any | null>(null);
@@ -857,12 +1082,14 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             };
           });
         }
-        fetchProfileById(user.uid);
+        if (isUUID(user.uid)) {
+          fetchProfileById(user.uid);
+        } else if (user.email) {
+          fetchProfileByEmail(user.email);
+        }
         registerPushNotifications(user.uid).catch((err) => {
           console.warn('Error self-registering push notifications:', err);
         });
-      } else if (user?.email) {
-        fetchProfileByEmail(user.email);
       } else {
         setDbUser(null);
       }
@@ -870,14 +1097,29 @@ function AppLayout({ children }: { children: React.ReactNode }) {
 
     // Supabase session listener for RLS / Supabase features
     supabase.auth.getSession().then((res) => {
-      setSupabaseSession(res?.data?.session || null);
+      const session = res?.data?.session || null;
+      setSupabaseSession(session);
+      if (session?.user) {
+        verifyUserIdentity().catch((err) => {
+          console.error('[AUTH_SYNC] Initial session fetch failed:', err);
+        });
+      }
     }).catch((err) => {
       console.warn('Failed to load initial Supabase session:', err);
       setSupabaseSession(null);
     });
 
-    const listener = supabase.auth.onAuthStateChange((_event, session) => {
+    const listener = supabase.auth.onAuthStateChange((event, session) => {
+      console.log("Auth Event Detected:", event, session);
       setSupabaseSession(session || null);
+      if (event === 'SIGNED_IN' && session?.user) {
+        verifyUserIdentity().catch((err) => {
+          console.error('[AUTH_SYNC] SIGNED_IN identity verify failed:', err);
+        });
+      } else if (!session) {
+        setUser(null);
+        setTradingProfile(null);
+      }
     });
     const subscription = listener?.data?.subscription || (listener as any)?.subscription;
 
@@ -896,9 +1138,11 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         setHeaderLocalBlob(e.detail.blobUrl);
       }
       if (firebaseUser?.uid) {
-        fetchProfileById(firebaseUser.uid);
-      } else if (firebaseUser?.email) {
-        fetchProfileByEmail(firebaseUser.email);
+        if (isUUID(firebaseUser.uid)) {
+          fetchProfileById(firebaseUser.uid);
+        } else if (firebaseUser.email) {
+          fetchProfileByEmail(firebaseUser.email);
+        }
       }
     };
 
@@ -908,7 +1152,29 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     };
   }, [firebaseUser]);
 
+  useEffect(() => {
+    const handleSettingsUpdate = (e: any) => {
+      if (e?.detail?.preset) {
+        setCurrentUserFaction({
+          faction_name: e.detail.preset,
+          faction_rank: 'Legionnaire',
+          faction_xp: 100
+        });
+      }
+    };
+    window.addEventListener('vanguard-settings-update' as any, handleSettingsUpdate);
+    return () => {
+      window.removeEventListener('vanguard-settings-update' as any, handleSettingsUpdate);
+    };
+  }, []);
+
   const fetchProfileById = async (userId: string) => {
+    if (!isUUID(userId)) {
+      console.log(`fetchProfileById: userId ${userId} is not a valid UUID. Redirecting to fetchProfileByEmail...`);
+      const fallbackEmail = firebaseUser?.email || 'agent@animeint.com';
+      fetchProfileByEmail(fallbackEmail);
+      return;
+    }
     fetchLocalUserFaction(userId);
     let session = null;
     try {
@@ -916,6 +1182,21 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       session = res?.data?.session || null;
     } catch (e) {
       console.warn('Failed to get session in fetchProfileById:', e);
+    }
+
+    // Fetch from user_avatars database table as requested
+    let userAvatarsUrl: string | null = null;
+    try {
+      const { data: uaData } = await supabase
+        .from('user_avatars')
+        .select('avatar_url')
+        .eq('id', userId)
+        .single();
+      if (uaData?.avatar_url) {
+        userAvatarsUrl = uaData.avatar_url;
+      }
+    } catch (uaErr) {
+      console.log('user_avatars fetch notice in App:', uaErr);
     }
 
     // Query user_profiles database table first to pull avatar_public_url for persistence
@@ -933,7 +1214,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       console.warn('user_profiles retrieval by ID in App bypassed/failed:', upErr);
     }
 
-    const cachedAvatar = userProfilesAvatar || localStorage.getItem('cached_avatar_url_' + userId);
+    const cachedAvatar = userAvatarsUrl || userProfilesAvatar || localStorage.getItem('cached_avatar_url_' + userId);
 
     const { data, error } = await supabase
       .from('profiles')
@@ -1019,6 +1300,21 @@ function AppLayout({ children }: { children: React.ReactNode }) {
     if (data) {
       fetchLocalUserFaction(data.id);
 
+      // Fetch from user_avatars database table as requested
+      let userAvatarsUrl: string | null = null;
+      try {
+        const { data: uaData } = await supabase
+          .from('user_avatars')
+          .select('avatar_url')
+          .eq('id', data.id)
+          .single();
+        if (uaData?.avatar_url) {
+          userAvatarsUrl = uaData.avatar_url;
+        }
+      } catch (uaErr) {
+        console.log('user_avatars fetch notice by email in App:', uaErr);
+      }
+
       // Query user_profiles database table first to pull avatar_public_url for persistence
       let userProfilesAvatar: string | null = null;
       try {
@@ -1034,7 +1330,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         console.warn('user_profiles retrieval by Email in App bypassed/failed:', upErr);
       }
 
-      const cachedAvatar = userProfilesAvatar || localStorage.getItem('cached_avatar_url_' + data.id);
+      const cachedAvatar = userAvatarsUrl || userProfilesAvatar || localStorage.getItem('cached_avatar_url_' + data.id);
 
       const enriched = await syncAndEnrichProfile(data, data.id);
       if (cachedAvatar) {
@@ -1238,13 +1534,15 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       title: 'Operations',
       items: [
         { name: 'Home Feed', path: '/', icon: HomeIcon },
+        { name: 'For You', path: '/for-you', icon: Sparkles },
         { name: 'Squad Ops', path: '/squad-ops', icon: Target },
         { name: 'Faction War', path: '/faction-war', icon: Swords },
         { name: 'Marketplace', path: '/marketplace', icon: Coins },
         { name: 'Data Relay', path: '/data-relay', icon: Radio },
         { name: 'Elite Leaderboard', path: '/leaderboard', icon: Trophy },
         { name: '🏦 HOUSE TREASURY', path: '/house-treasury', icon: Landmark },
-        { name: 'Recruitment', path: '/recruit', icon: RecruitIcon }
+        { name: 'Recruitment', path: '/recruit', icon: RecruitIcon },
+        { name: 'Community', path: '/community', icon: MessageSquare }
       ]
     },
     {
@@ -1252,6 +1550,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       items: [
         { name: 'Database', path: '/database', icon: DatabaseIcon },
         { name: 'Neural News', path: '/news', icon: FileText },
+        { name: 'Announcements', path: '/announcements', icon: Radio },
         { name: 'Archives', path: '/archives', icon: Library },
         { name: 'Neural Maps', path: '/neural-maps', icon: Compass },
         { name: 'Skill Tree', path: '/skill-tree', icon: Award },
@@ -1307,8 +1606,8 @@ function AppLayout({ children }: { children: React.ReactNode }) {
   const headerAvatarPublicUrl = currentDbUser?.avatar_url || currentDbUser?.profile_photo_url || currentDbUser?.avatar || '';
   const headerCachedUrl = headerProfileId ? (localStorage.getItem('cached_avatar_url_' + headerProfileId) || '') : '';
   const headerDefaultPlaceholder = `https://api.dicebear.com/7.x/avataaars/svg?seed=${headerProfileId || 'default'}`;
-  const headerAvatarSrc = headerAvatarPublicUrl || headerCachedUrl || headerLocalBlob || headerDefaultPlaceholder;
-  const headerAvatarKey = headerAvatarPublicUrl || headerCachedUrl || headerLocalBlob;
+  const headerAvatarSrc = avatarUrl || headerAvatarPublicUrl || headerCachedUrl || headerLocalBlob || headerDefaultPlaceholder;
+  const headerAvatarKey = avatarUrl || headerAvatarPublicUrl || headerCachedUrl || headerLocalBlob;
 
   const displayHeadline = activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED";
 
@@ -1463,19 +1762,27 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        {/* Telemetry data streams */}
+         {/* Telemetry data streams */}
         <div className="flex flex-col gap-1.5 font-mono text-[8px] text-[#A8A8B2] border-b border-white/5 pb-2">
           <div className="flex justify-between">
             <span>SYSTEM_STATUS:</span>
-            <span className="text-white font-black uppercase">CORE_ACTIVE_99</span>
+            {isArchitect ? (
+              <span className="text-amber-400 font-extrabold animate-pulse uppercase">ARCHITECT_CORE_CONTROL_ANSH_SINGH</span>
+            ) : (
+              <span className="text-white font-black uppercase">CORE_ACTIVE_99</span>
+            )}
           </div>
           <div className="flex justify-between">
             <span>CONNECTION:</span>
-            <span className="text-[#00BFFF] font-black uppercase">NEX-SECURE-SSH</span>
+            <span className={isArchitect ? "text-amber-400 font-bold uppercase animate-pulse" : "text-[#00BFFF] font-black uppercase"}>
+              {isArchitect ? "SYS_ROOT_OVERRIDE" : "NEX-SECURE-SSH"}
+            </span>
           </div>
           <div className="flex justify-between">
             <span>AUTH_LEVEL:</span>
-            <span className="text-[#A855F7] font-black uppercase">VANGUARD_LEVEL_9</span>
+            <span className={isArchitect ? "text-amber-500 font-extrabold uppercase animate-pulse" : "text-[#A855F7] font-black uppercase"}>
+              {isArchitect ? "LEVEL_10_ARCHITECT" : "VANGUARD_LEVEL_9"}
+            </span>
           </div>
           <div className="flex justify-between">
             <span>PIN_PULSES:</span>
@@ -1507,11 +1814,14 @@ function AppLayout({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Sidebar */}
-      <aside className={`
-        fixed inset-y-0 left-0 z-50 w-64 bg-[var(--faction-panel-bg)] border-r border-[var(--faction-border)] flex flex-col shrink-0 
-        transition-transform duration-300 lg:relative lg:translate-x-0
-        ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
-      `}>
+      <aside 
+        id="app-sidebar-aside"
+        className={`
+          fixed inset-y-0 left-0 z-50 w-64 bg-[var(--faction-panel-bg)] border-r border-[var(--faction-border)] flex flex-col shrink-0 
+          transition-transform duration-300 lg:relative lg:translate-x-0
+          ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        `}
+      >
         <div className="p-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-gradient-to-br from-[var(--faction-primary)] to-[var(--faction-primary-glow)] rounded-sm rotate-45 flex items-center justify-center">
@@ -1538,6 +1848,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="flex flex-col gap-0.5">
               {[
                 { name: 'Home Feed', path: '/', icon: HomeIcon },
+                { name: 'Community', path: '/community', icon: MessageSquare },
                 { name: 'Sector Tactical Maps', path: '/sector-tactical-maps', icon: Compass },
                 { name: 'Nexus Treasury & Ledger', path: '/nexus-treasury', icon: Landmark },
                 { name: 'Vanguard Command Center', path: '/vanguard-command', icon: ShieldAlert },
@@ -1563,6 +1874,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
           <div>
             <button
               type="button"
+              id="sidebar-extended-modes-btn"
               onClick={() => {
                 const nextState = !extendedNavOpen;
                 setExtendedNavOpen(nextState);
@@ -1603,6 +1915,7 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                               <Link 
                                 key={item.path}
                                 to={item.path}
+                                id={item.path === '/for-you' ? 'sidebar-for-you-link' : undefined}
                                 className={`flex items-center gap-3 px-3 py-1.5 text-xs font-bold rounded-lg transition-all hover-pulse ${
                                   location.pathname === item.path 
                                     ? 'bg-black/40 border border-crimson text-white shadow-[0_0_15px_rgba(229,9,20,0.3)]' 
@@ -1620,7 +1933,20 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                     
                     {isAdmin && (
                       <div className="space-y-1 pt-1">
-                        <div className="text-[9px] uppercase tracking-[0.2em] text-zinc-500 font-extrabold mb-1.5 px-2 select-none">Management</div>
+                        <div className="text-[9px] uppercase tracking-[0.2em] text-red-500 font-extrabold mb-1.5 px-2 select-none">// ZERO TRUST SYSTEM</div>
+                        
+                        <Link 
+                          to="/alpha-sector-9-override"
+                          className={`flex items-center gap-3 px-3 py-1.5 text-xs font-bold rounded-lg transition-all hover-pulse ${
+                            location.pathname === '/alpha-sector-9-override' 
+                              ? 'bg-red-950/20 border border-red-500/50 text-white shadow-[0_0_15px_rgba(239,68,68,0.2)]' 
+                              : 'text-gray-400 hover:text-white border border-transparent hover:border-red-500/30'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping shrink-0" />
+                          MFA Portal
+                        </Link>
+
                         <Link 
                           to="/admin"
                           className={`flex items-center gap-3 px-3 py-1.5 text-xs font-bold rounded-lg transition-all hover-pulse ${
@@ -1629,8 +1955,20 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                               : 'text-gray-400 hover:text-white border border-transparent hover:border-crimson/50'
                           }`}
                         >
-                          <AdminIcon size={15} className="text-gray-500" />
-                          Admin Panel
+                          <AdminIcon size={15} className="text-gray-500 shrink-0" />
+                          Admin Console
+                        </Link>
+
+                        <Link 
+                          to="/code"
+                          className={`flex items-center gap-3 px-3 py-1.5 text-xs font-bold rounded-lg transition-all hover-pulse ${
+                            location.pathname === '/code' 
+                              ? 'bg-black/40 border border-rose-500 text-white shadow-[0_0_15px_rgba(244,63,94,0.3)]' 
+                              : 'text-gray-400 hover:text-white border border-transparent hover:border-rose-500/40'
+                          }`}
+                        >
+                          <span className="w-1.5 h-1.5 bg-rose-500 rounded-sm shrink-0" />
+                          Code Console
                         </Link>
                       </div>
                     )}
@@ -1727,6 +2065,71 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                 {isStarkSummer ? '☀️ SUMMER IS HERE' : '❄️ WINTER ACTIVE'}
               </button>
             )}
+            {/* Holographic Theme Swapper */}
+            <div className="relative group/theme-selector">
+              <button 
+                type="button"
+                className="px-2 py-1.5 bg-black/40 border border-white/5 hover:border-[var(--faction-primary,#E50914)] text-zinc-300 hover:text-white text-[9px] font-mono font-black uppercase tracking-widest rounded-lg transition-all shadow-[0_0_10px_rgba(0,0,0,0.5)] cursor-pointer flex items-center gap-2 active:scale-95 select-none"
+                title="Quick Access: Switch Visual Terminal Matrix Theme"
+              >
+                <Palette size={11} className="text-[var(--faction-primary,#E50914)]" />
+                <span>THEME</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[var(--faction-primary,#E50914)] shadow-[0_0_8px_var(--faction-primary,#E50914)] shrink-0" />
+              </button>
+              
+              {/* Dropdown panel */}
+              <div className="absolute right-0 top-full mt-2 w-48 bg-[#09080d]/98 backdrop-blur-xl border border-white/10 rounded-xl shadow-[0_10px_35px_rgba(0,0,0,0.85)] p-2 hidden group-hover/theme-selector:flex flex-col gap-1 z-50 font-mono text-[9px] uppercase tracking-wider leading-none">
+                <div className="text-[7px] text-zinc-500 font-extrabold px-2 py-1.5 border-b border-white/5 select-none tracking-widest">
+                  TERMINAL SYSTEM THEMES
+                </div>
+                {[
+                  { id: 'akatsuki', name: 'Akatsuki Crimson', color: '#E50914' },
+                  { id: 'stark', name: 'Stark Polar Ice', color: '#00BFFF' },
+                  { id: 'britannian', name: 'Britannia Royal', color: '#A855F7' },
+                  { id: 'lannister', name: 'Lannister Gold', color: '#FF9900' },
+                  { id: 'emerald', name: 'Emerald Matrix', color: '#10B981' }
+                ].map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => {
+                      playDigitalSound('ping');
+                      localStorage.setItem('vanguard_custom_preset_theme', preset.id);
+                      localStorage.setItem('active_faction_name', preset.id);
+                      window.dispatchEvent(new CustomEvent('vanguard-settings-update', {
+                        detail: { preset: preset.id }
+                      }));
+                    }}
+                    className={`flex items-center justify-between w-full p-2 hover:bg-white/5 rounded-lg text-left transition-all border border-transparent ${
+                      currentUserFaction?.faction_name?.toLowerCase().includes(preset.id)
+                        ? 'border-white/10 bg-white/5 text-white'
+                        : 'text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: preset.color, boxShadow: `0 0 8px ${preset.color}` }} />
+                      <span className="font-extrabold">{preset.name}</span>
+                    </div>
+                    {currentUserFaction?.faction_name?.toLowerCase().includes(preset.id) && (
+                      <span className="text-[6px] bg-white/10 text-white px-1 py-0.5 rounded">ON</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Guide Me System Walkthrough */}
+            <button 
+              onClick={() => {
+                setIsTourOpen(true);
+                playDigitalSound('click');
+              }}
+              className="px-2 py-1.5 bg-black/40 border border-white/5 hover:border-[var(--faction-primary,#E50914)] text-zinc-400 hover:text-white text-[9px] font-mono font-black uppercase tracking-widest rounded-lg transition-all shadow-[0_0_10px_rgba(0,0,0,0.5)] cursor-pointer flex items-center gap-1.5 active:scale-95 select-none"
+              title="Initiate Cognitive Interface Walkthrough Protocol"
+            >
+              <HelpCircle size={11} className="text-[var(--faction-primary,#E50914)]" /> [GUIDE_ME]
+            </button>
+
             <button className="p-2 text-gray-500 hover:text-white transition-colors relative">
                <Bell size={20} />
                <span className="absolute top-2 right-2 w-2 h-2 bg-[var(--faction-primary)] rounded-full border-2 border-[var(--faction-bg)]"></span>
@@ -1770,14 +2173,25 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         {/* Content Area */}
         <main className="flex-1 overflow-y-auto custom-scrollbar relative z-10">
           {/* Headline Frame Component */}
-          <div className="bg-[#050508]/90 border-b border-[var(--faction-border)] py-2 px-6 lg:px-8 flex items-center gap-4 overflow-hidden select-none shrink-0 z-10 sticky top-0 backdrop-blur-md">
+          <div 
+            id="neural-stream-marquee"
+            className="bg-[#050508]/90 border-b border-[var(--faction-border)] py-2 px-6 lg:px-8 flex items-center gap-4 overflow-hidden select-none shrink-0 z-10 sticky top-0 backdrop-blur-md"
+          >
             <div className="flex items-center gap-1.5 px-2 py-0.5 bg-red-600/10 border border-red-500/30 rounded text-red-500 text-[9px] font-black uppercase tracking-widest shrink-0 animate-pulse">
               <span className="inline-block w-1 h-1 rounded-full bg-red-600"></span>
               NEURAL STREAM
             </div>
             <div className="flex-1 overflow-hidden">
-              <div className="animate-marquee-slower whitespace-nowrap text-[10px] font-mono font-bold tracking-[0.2em] text-gray-300">
-                {activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED"} • {activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED"} • {activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED"}
+              <div className={`animate-marquee-slower whitespace-nowrap text-[10px] font-mono font-bold tracking-[0.2em] ${isArchitect ? "text-amber-400 font-extrabold" : "text-gray-300"}`}>
+                {isArchitect ? (
+                  <>
+                    [ACCESS_GRANTED: SYSTEM_ARCHITECT_ANSH_SINGH_AUTHORIZED_OVERRIDE_ACTIVE] • [ACCESS_GRANTED: SYSTEM_ARCHITECT_ANSH_SINGH_AUTHORIZED_OVERRIDE_ACTIVE] • [ACCESS_GRANTED: SYSTEM_ARCHITECT_ANSH_SINGH_AUTHORIZED_OVERRIDE_ACTIVE]
+                  </>
+                ) : (
+                  <>
+                    {activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED"} • {activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED"} • {activeArticle?.title ? activeArticle.title.toUpperCase() : breakingNews?.text ? breakingNews.text.toUpperCase() : "VANGUARD OPS: ARCHIVES SYSTEM EXPANSION INITIALIZED"}
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -1824,6 +2238,17 @@ function AppLayout({ children }: { children: React.ReactNode }) {
                <span className="text-[var(--faction-primary)] font-bold animate-pulse">[ACTIVE] 12,402 NODES ONLINE</span>
             </motion.div>
           </div>
+
+          {/* Debug Ticker only appearing on mobile devices */}
+          {isMobileDevice && (
+            <div className="flex items-center gap-1.5 bg-red-950/30 border border-red-500/30 px-2 py-0.5 rounded text-red-500 text-[8px] font-mono shrink-0 select-text max-w-[130px] sm:max-w-[200px] truncate ml-4">
+              <span className="w-1 h-1 rounded-full bg-red-500 animate-ping shrink-0" />
+              <span className="font-extrabold tracking-tight">
+                {mobileErrors.length > 0 ? mobileErrors[mobileErrors.length - 1] : "[ERR_CODE: OK]"}
+              </span>
+            </div>
+          )}
+
           <div className="ml-4 flex gap-4 items-center shrink-0">
             {descentState === 'settled' && (
               <div className="hidden md:flex items-center gap-3 text-[9px] font-mono font-black text-emerald-500 tracking-wider animate-fade-in">
@@ -2444,6 +2869,62 @@ function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
         </motion.div>
       </motion.div>
+
+      {/* Glassmorphic Realtime Broadcast Toast */}
+      <AnimatePresence>
+        {activeToast && (
+          <motion.div
+            id="news-realtime-toast"
+            initial={{ opacity: 0, y: 50, scale: 0.9, x: 50 }}
+            animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
+            exit={{ opacity: 0, scale: 0.85, y: 20, transition: { duration: 0.2 } }}
+            whileHover={{ scale: 1.02 }}
+            onClick={() => {
+              try {
+                playDigitalSound('click');
+              } catch (se) {}
+              navigate('/announcements');
+              setActiveToast(null);
+            }}
+            className="fixed bottom-6 right-6 z-[9999] max-w-sm w-full bg-black/90 backdrop-blur-xl border border-red-500/30 rounded-2xl p-4 shadow-[0_10px_30px_rgba(239,68,68,0.2)] flex gap-4 items-center cursor-pointer select-none overflow-hidden group hover:border-red-500/60 transition-colors"
+          >
+            {/* Corner tech indicators */}
+            <div className="absolute top-0 right-0 w-2.5 h-2.5 border-t-2 border-r-2 border-red-500/40" />
+            <div className="absolute bottom-0 left-0 w-2.5 h-2.5 border-b-2 border-l-2 border-red-500/40" />
+            
+            {/* News visual thumb */}
+            <div className="size-12 rounded-xl overflow-hidden bg-white/5 border border-white/10 shrink-0 relative flex items-center justify-center">
+              {activeToast.image_url ? (
+                <img src={activeToast.image_url} referrerPolicy="no-referrer" alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-red-600/10">
+                  <Bell className="text-red-500 animate-bounce" size={18} />
+                </div>
+              )}
+            </div>
+
+            {/* Text details */}
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[8px] font-mono font-black uppercase bg-red-600/20 text-red-400 px-1.5 py-0.5 rounded tracking-widest leading-none">
+                  {activeToast.category}
+                </span>
+                <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest leading-none flex items-center gap-1">
+                  <div className="size-1 bg-red-500 rounded-full animate-ping" /> NEW BROADCAST
+                </span>
+              </div>
+              <h4 className="text-xs font-bold text-white group-hover:text-red-400 transition-colors uppercase italic truncate mt-1.5">
+                {activeToast.title}
+              </h4>
+              <p className="text-[9px] text-zinc-400 font-mono uppercase tracking-wide mt-0.5">
+                Click to expand broadcast ledger...
+              </p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
+      <TourGuide isOpen={isTourOpen} onClose={() => setIsTourOpen(false)} />
     </NewsContext.Provider>
   );
 }
@@ -2455,17 +2936,22 @@ export default function App() {
         <AppLayout>
           <Routes>
             <Route path="/" element={<Home />} />
+            <Route path="/for-you" element={<ForYou />} />
+            <Route path="/community" element={<Community />} />
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/auth/reset-password" element={<ResetPassword />} />
             <Route path="/database" element={<AnimeDatabase />} />
             <Route path="/news" element={<News />} />
             <Route path="/news/:id" element={<NewsDetail />} />
+            <Route path="/announcements" element={<Announcements />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/leaderboard" element={<Leaderboard />} />
             <Route path="/house-treasury" element={<HouseCards />} />
             <Route path="/anime/:id" element={<AnimeDetails />} />
             <Route path="/recruit" element={<Recruitment />} />
             <Route path="/admin" element={<Admin />} />
+            <Route path="/alpha-sector-9-override" element={<ZeroTrustPortal />} />
+            <Route path="/code" element={<CodeConsole />} />
             <Route path="/legal" element={<LegalPage />} />
             <Route path="/archives" element={<Archives />} />
             <Route path="/neural-maps" element={<NeuralMaps />} />
